@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from summarizer import summarize_news
-from resume_analyzer import process_resume_with_news
+from chatbot import process_resume_with_news
 
 app = FastAPI(title="AI Agent API")
 
@@ -37,3 +37,6 @@ def analyze_resume(request: FeedbackRequest):
         return {"status": "success", "feedback": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+    
+
+# uvicorn main:app --host 0.0.0.0 --port 8000 --reload

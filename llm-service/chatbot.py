@@ -137,7 +137,7 @@ def process_resume_with_news(resume_path: str, news_path: str) -> str:
 
     # 실행
     final_state = compiled_graph.invoke({
-        "file_path": "./file_data/이력서_이준기.pdf",
-        "company_analysis": "./news_data/news_sample1_summary.json"
+        "file_path": resume_path,
+        "company_analysis": company_analysis
     })
     return final_state["feedback"]

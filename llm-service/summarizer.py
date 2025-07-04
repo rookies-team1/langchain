@@ -4,6 +4,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_ollama import ChatOllama
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_community.llms import Ollama
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -21,6 +23,7 @@ prompt = PromptTemplate(
     요약은 다음 기준에 맞게 작성해 주세요:
     - 과장 없이, 사실 기반으로
     - 투자자가 아닌 취준생의 시선에서 기업을 이해하는 데 도움되도록
+    - 답변만 출력
 
     [제목]
     {title}
@@ -29,13 +32,7 @@ prompt = PromptTemplate(
     {content}
     """)                                     
 
-# Groq API를 사용하는 ChatOpenAI 인스턴스 생성
-llm = ChatOpenAI(
-    api_key=OPENAI_API_KEY,
-    base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
-    model="meta-llama/llama-4-scout-17b-16e-instruct",
-    temperature=0.7
-)
+llm = Ollama(model = "qwen3:1.7b")
 
 # llm = ChatOllama(model="bge-m3:latest")
 
