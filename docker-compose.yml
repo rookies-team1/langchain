@@ -1,24 +1,31 @@
 services:
+  ollama:
+    image: ollama/ollama
+    container_name: ollama_svc
+    entrypoint: |
+      /bin/bash -c "
+      ollama serve &
+      sleep 5 &&
+      echo 'Pulling bge-m3:567m model...' &&
+      ollama pull bge-m3:567m &&
+      echo 'Model ready. Restarting server in foreground.' &&
+      pkill ollama &&
+      ollama serve
+      "
+    volumes:
+      - ollama_data:/root/.ollama
+
   llm-service:
-    image: kwonsoonmin/llm-service:dev0.1 # Updated to match dev-action.yml
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    build: .
+    container_name: llm-svc
     depends_on:
       - ollama
+    ports:
+      - "8000:8000"
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - TAVILY_API_KEY=${TAVILY_API_KEY}
 
-  ollama:
-    image: ollama/ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama:/root/.ollama
-
 volumes:
-  ollama:
+  ollama_data:

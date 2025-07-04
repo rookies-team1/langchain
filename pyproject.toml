@@ -18,6 +18,10 @@ pypdf = ">=5.7.0,<6.0.0"
 uvicorn = ">=0.20.0,<0.21.0"
 python-dotenv = ">=1.0.0,<2.0.0"
 langchain-google-genai = "^2.1.6"
+langchain-community = "^0.3.27"
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
