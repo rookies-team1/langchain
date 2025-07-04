@@ -16,7 +16,11 @@ services:
       - "11434:11434"
     volumes:
       - ollama:/root/.ollama
-    command: ["/bin/sh", "-c", "ollama pull bge-m3:latest && ollama serve"]
+      # entrypoint.sh 파일을 컨테이너 내부로 마운트
+      - ./entrypoint.sh:/entrypoint.sh
+    # 컨테이너 시작 시 entrypoint.sh 스크립트 실행
+    entrypoint: ["/entrypoint.sh"]
+    command: []
 
 volumes:
   ollama:

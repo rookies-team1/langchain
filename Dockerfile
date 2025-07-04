@@ -5,7 +5,7 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock* /app/
 
 RUN pip install poetry
-RUN poetry config virtualenvs.create false && poetry install --no-dev --no-root
+RUN poetry config virtualenvs.create false && poetry install --no-root
 
 COPY ./llm-service /app/llm-service
 
