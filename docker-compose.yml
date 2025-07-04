@@ -1,5 +1,6 @@
 services:
   llm-service:
+    image: kwonsoonmin/llm-service:dev0.1 # Updated to match dev-action.yml
     build:
       context: .
       dockerfile: Dockerfile
@@ -9,6 +10,8 @@ services:
       - ollama
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
 
   ollama:
     image: ollama/ollama
