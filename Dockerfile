@@ -3,6 +3,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y build-essential
+
 # Poetry 의존성 설치
 COPY pyproject.toml poetry.lock* /app/
 RUN pip install poetry
