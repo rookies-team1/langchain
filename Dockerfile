@@ -9,6 +9,9 @@ RUN poetry config virtualenvs.create false && poetry install --no-root
 
 COPY ./llm-service /app/llm-service
 
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8000
 
-CMD ["poetry", "run", "uvicorn", "llm-service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/entrypoint.sh"]
