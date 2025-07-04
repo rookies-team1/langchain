@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y build-essential libopenblas-dev libomp-
 # Poetry 의존성 설치
 COPY pyproject.toml /app/
 RUN pip install poetry
-RUN poetry config virtualenvs.create false && poetry install --no-root --only main
+RUN poetry install
 
 # 애플리케이션 코드 복사
 COPY ./llm-service /app/llm-service
