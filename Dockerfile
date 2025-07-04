@@ -4,10 +4,10 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y build-essential
+RUN apt-get update && apt-get install -y build-essential libopenblas-dev libomp-dev
 
 # Poetry 의존성 설치
-COPY pyproject.toml poetry.lock* /app/
+COPY pyproject.toml /app/
 RUN pip install poetry
 RUN poetry config virtualenvs.create false && poetry install --no-root --only main
 
