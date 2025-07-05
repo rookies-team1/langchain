@@ -17,6 +17,7 @@ services:
 
   llm-service:
     build: .
+    image: kwonsoonmin/llm-service:dev01
     container_name: llm-svc
     depends_on:
       - ollama
