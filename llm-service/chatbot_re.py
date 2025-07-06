@@ -50,7 +50,8 @@ route_prompt = ChatPromptTemplate.from_template("""
     - 일반 정보 질문이면 "qa"
     - 첨부 문서를 기반으로 피드백 요청이면 "feedback"
 
-    반드시 위 단어 중 하나만 출력하세요.
+    반드시 위 단어 qa와 feedback 중 하나만 출력하세요.
+    절대 다른 단어를 포함하지 마세요.
 """)
 
 route_chain = LLMChain(llm=llm_split, prompt=route_prompt)
@@ -70,14 +71,21 @@ chain_split = LLMChain(llm=llm_split, prompt=split_prompt)
 
 # --- 노드 정의 ---
 def route_by_input_type(state: GraphState) -> str:
-    result = route_chain.run(question=state["user_question"]).strip().lower()
-    print(f"🪐 LLM 판단 결과: {result}")
+    raw_result = route_chain.run(question=state["user_question"])
+    result = clean_llm_output(raw_result).strip().lower()
+    print(f"🪐 LLM 판단 결과 (클린): {result} ({type(result)})")
+
     if "feedback" in result:
-        return "LoadPDF"
+        return "feedback"
     elif "qa" in result:
-        return "AnswerQuestion"
+        return "qa"
     else:
         raise ValueError(f"지원되지 않는 응답: {result}")
+
+
+def router_node(state: GraphState) -> GraphState:
+    # 단순히 상태 그대로 반환만 하면 됨
+    return state
 
 def load_resume_pdf(state: GraphState) -> GraphState:
     loader = PyPDFLoader(state["file_path"])
@@ -119,12 +127,18 @@ def load_company_analysis(state: GraphState) -> GraphState:
 def match_and_feedback(state: GraphState) -> GraphState:
     retriever = state["vectorstore"].as_retriever()
     qa_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever)
+
     prompt = f"""
-    다음은 한 기업의 뉴스 기사 분석 내용입니다:
+    다음은 사용자 질문입니다:
+    \"\"\"{state['user_question']}\"\"\"
 
-    "{state['company_analysis']}"
+    아래는 한 기업의 뉴스 기사 분석 내용입니다:
+    \"\"\"{state['company_analysis']}\"\"\"
 
-    이력서/포트폴리오 항목별로 강조할 점, 부족한 점, 보완점을 구체적으로 작성해주세요.
+    그리고 첨부된 이력서 또는 포트폴리오 내용을 바탕으로 한 정보가 포함되어 있습니다.
+
+    뉴스 기사 내용과 첨부 파일의 내용을 모두 고려하여,  
+    사용자 질문에 대해 이력서/포트폴리오 항목별로 강조할 점, 부족한 점, 보완할 점을 구체적이고 명확하게 작성해 주세요.
     """
     raw_feedback = qa_chain.run(prompt)
     feedback = clean_llm_output(raw_feedback)
@@ -181,23 +195,10 @@ def run_langgraph_flow(user_question: str,
         state["vectorstore"] = vectorstore
 
     graph = StateGraph(GraphState)
+    
 
     # graph.add_node("router", route_by_input_type)
-    # graph.add_node("ClassifyPages", classify_by_page)
-    # graph.add_node("ToSectionMap", make_section_map)
-    # graph.add_node("VectorIndexing", vector_indexing)
-    # graph.add_node("LoadCompanyInfo", load_company_analysis)
-    # graph.add_node("Feedback", match_and_feedback)
-
-    # graph.set_entry_point("router")
-
-    # graph.add_edge("ClassifyPages", "ToSectionMap")
-    # graph.add_edge("ToSectionMap", "VectorIndexing")
-    # graph.add_edge("VectorIndexing", "LoadCompanyInfo")
-    # graph.add_edge("LoadCompanyInfo", "Feedback")
-    # graph.add_edge("Feedback", END)
-
-    graph.add_node("router", route_by_input_type)
+    graph.add_node("router", router_node)
     graph.add_node("LoadPDF", load_resume_pdf)
     graph.add_node("ClassifyPages", classify_by_page)
     graph.add_node("ToSectionMap", make_section_map)
@@ -205,14 +206,12 @@ def run_langgraph_flow(user_question: str,
     graph.add_node("LoadCompanyInfo", load_company_analysis)
     graph.add_node("Feedback", match_and_feedback)
     graph.add_node("AnswerQuestion", answer_question)
-    
+
     graph.set_entry_point("router")
 
-
-    # router 분기 처리
     graph.add_conditional_edges("router", route_by_input_type, {
-        "LoadPDF": "ClassifyPages",
-        "AnswerQuestion": END
+        "feedback": "LoadPDF",
+        "qa": "AnswerQuestion"
     })
 
     graph.add_edge("LoadPDF", "ClassifyPages")
@@ -222,8 +221,11 @@ def run_langgraph_flow(user_question: str,
     graph.add_edge("LoadCompanyInfo", "Feedback")
     graph.add_edge("Feedback", END)
 
+    graph.add_edge("AnswerQuestion", END)
+
 
     compiled = graph.compile()
     result = compiled.invoke(state)
     print("✅ 플로우 실행 완료")
     return result
+
