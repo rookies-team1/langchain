@@ -197,8 +197,17 @@ def run_langgraph_flow(user_question: str,
     # graph.add_edge("LoadCompanyInfo", "Feedback")
     # graph.add_edge("Feedback", END)
 
+    graph.add_node("router", route_by_input_type)
     graph.add_node("LoadPDF", load_resume_pdf)
+    graph.add_node("ClassifyPages", classify_by_page)
+    graph.add_node("ToSectionMap", make_section_map)
+    graph.add_node("VectorIndexing", vector_indexing)
+    graph.add_node("LoadCompanyInfo", load_company_analysis)
+    graph.add_node("Feedback", match_and_feedback)
     graph.add_node("AnswerQuestion", answer_question)
+    
+    graph.set_entry_point("router")
+
 
     # router 분기 처리
     graph.add_conditional_edges("router", route_by_input_type, {
