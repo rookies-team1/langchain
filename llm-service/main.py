@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from summarizer import summarize_news
-from chatbot import process_resume_with_news
+from chatbot_re import run_langgraph_flow
 
 app = FastAPI(title="AI Agent API")
 
@@ -22,21 +22,30 @@ async def summarize(news: News):
     except Exception as e:
         return {"error": str(e)}
     
-# 이력서 분석 및 피드백 요청 처리
-class FeedbackRequest(BaseModel):
-    resume_path: str
-    news_path: str
+# LLM 기반 멀티 기능 처리 요청
+class ChatbotRequest(BaseModel):
+    user_question: str
+    resume_path: str = None  # optional
+    news_full_path: str = None
+    news_summary_path: str
 
-@app.post("/feedback")
-def analyze_resume(request: FeedbackRequest):
+@app.post("/chatbot")
+def chatbot_router(request: ChatbotRequest):
     try:
-        result = process_resume_with_news(
+        result = run_langgraph_flow(
+            user_question=request.user_question,
             resume_path=request.resume_path,
-            news_path=request.news_path
+            news_full_path=request.news_full_path,
+            news_summary_path=request.news_summary_path
         )
-        return {"status": "success", "feedback": result}
+        return {
+            "status": "success",
+            "next_node": result.get("next_node"),
+            "answer": result.get("answer"),
+            "feedback": result.get("feedback"),
+            "chat_history": result.get("chat_history"),
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
-    
 
 # uvicorn main:app --host 0.0.0.0 --port 8000 --reload
