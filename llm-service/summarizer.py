@@ -5,7 +5,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_ollama import ChatOllama
 from langchain.embeddings import HuggingFaceEmbeddings
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
+import re
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -32,14 +33,25 @@ prompt = PromptTemplate(
     {content}
     """)                                     
 
-llm = Ollama(model = "qwen3:1.7b")
-
-# llm = ChatOllama(model="bge-m3:latest")
+llm = OllamaLLM(model = "qwen3:1.7b")
 
 # chain 연결 (LCEL) prompt + llm + outputparser
 output_parser = StrOutputParser()
 chain = prompt | llm | output_parser
 
+
+def clean_llm_output(text: str) -> str:
+    # <think>...</think> 블록 제거
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # 출력 시작/끝에 markdown block이 남는 경우 제거
+    text = text.strip()
+    # markdown block 안에만 남아있는 경우 잘라내기
+    # 예: ```markdown ... ``` 구조 제거
+    text = re.sub(r"```(?:markdown)?\s*(.*?)```", r"\1", text, flags=re.DOTALL | re.IGNORECASE)
+    # 연속되는 3줄 이상 줄바꿈은 2줄로 축소
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    # 필요 없는 선두/후미 공백 제거
+    return text.strip()
 
 # chain 호출
 # try:
@@ -49,4 +61,5 @@ chain = prompt | llm | output_parser
 #     print(f"오류 발생: {e}")
 
 def summarize_news(news_json: dict) -> str:
-    return chain.invoke(news_json)
+    raw_output = chain.invoke(news_json)
+    return clean_llm_output(raw_output)

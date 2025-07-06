@@ -13,16 +13,17 @@ from langchain.chains import LLMChain, RetrievalQA
 from langgraph.graph import StateGraph, END
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from langchain_core.messages import BaseMessage
+import re
 
 # Load API key and suppress warnings
 load_dotenv()
 warnings.filterwarnings("ignore")
 
 # LLM 설정
-llm_split = Ollama(model="qwen3:1.7b")
-llm_feedback = Ollama(model="qwen3:1.7b")
+llm_split = OllamaLLM(model="qwen3:1.7b")
+llm_feedback = OllamaLLM(model="qwen3:1.7b")
 
 # --- 상태 정의 ---
 class GraphState(TypedDict):
@@ -40,18 +41,18 @@ class GraphState(TypedDict):
 
 # --- 프롬프트 설정 ---
 route_prompt = ChatPromptTemplate.from_template("""
-다음은 사용자의 입력입니다:
+    다음은 사용자의 입력입니다:
 
-"{question}"
+    "{question}"
 
-이 입력은 어떤 작업을 요청하고 있나요?
+    이 입력은 어떤 작업을 요청하고 있나요?
 
-- 일반 정보 질문이면 "qa"
-- 첨부 문서를 기반으로 피드백 요청이면 "feedback"
-- 뉴스 요약 요청이면 "summarize"
+    - 일반 정보 질문이면 "qa"
+    - 첨부 문서를 기반으로 피드백 요청이면 "feedback"
 
-반드시 위 단어 중 하나만 출력하세요.
+    반드시 위 단어 중 하나만 출력하세요.
 """)
+
 route_chain = LLMChain(llm=llm_split, prompt=route_prompt)
 
 split_prompt = ChatPromptTemplate.from_template("""
@@ -64,6 +65,7 @@ split_prompt = ChatPromptTemplate.from_template("""
 
 한 단어로 항목을 분류하고, 간단한 이유를 설명해주세요.
 """)
+
 chain_split = LLMChain(llm=llm_split, prompt=split_prompt)
 
 # --- 노드 정의 ---
@@ -78,8 +80,6 @@ def route_by_input_type(state: GraphState) -> GraphState:
         state = vector_indexing(state)
         state = load_company_analysis(state)
         state = match_and_feedback(state)
-    elif "summarize" in result:
-        state = summarize_news(state)
     elif "qa" in result:
         state = answer_question(state)
     else:
@@ -139,13 +139,6 @@ def match_and_feedback(state: GraphState) -> GraphState:
     print("✅ 피드백 생성 완료")
     return {**state, "feedback": feedback}
 
-# def answer_question(state: GraphState) -> GraphState:
-#     retriever = state["vectorstore"].as_retriever()
-#     qa_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever)
-#     result = qa_chain.run(state["user_question"])
-#     print("✅ 질문 답변 생성 완료")
-#     return {**state, "answer": result}
-
 def answer_question(state: GraphState) -> GraphState:
     if state.get("vectorstore"):
         retriever = state["vectorstore"].as_retriever()
@@ -158,18 +151,19 @@ def answer_question(state: GraphState) -> GraphState:
     print("✅ 질문 답변 생성 완료")
     return {**state, "answer": result}
 
-def summarize_news(state: GraphState) -> GraphState:
-    summary = f"[뉴스 요약] {state['user_question'][:50]}..."
-    print("✅ 뉴스 요약 완료")
-    return {**state, "news_summary": summary}
-
 def clean_llm_output(text: str) -> str:
     # <think>...</think> 블록 제거
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    # 불필요한 연속 줄바꿈 제거
-    text = re.sub(r"\n\s*\n", "\n\n", text)
-    # 양 끝 공백 제거
+    # 출력 시작/끝에 markdown block이 남는 경우 제거
+    text = text.strip()
+    # markdown block 안에만 남아있는 경우 잘라내기
+    # 예: ```markdown ... ``` 구조 제거
+    text = re.sub(r"```(?:markdown)?\s*(.*?)```", r"\1", text, flags=re.DOTALL | re.IGNORECASE)
+    # 연속되는 3줄 이상 줄바꿈은 2줄로 축소
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    # 필요 없는 선두/후미 공백 제거
     return text.strip()
+
 
 # --- 실행 함수 ---
 def run_langgraph_flow(user_question: str,
@@ -204,19 +198,6 @@ def run_langgraph_flow(user_question: str,
     graph.add_node("Feedback", match_and_feedback)
 
     graph.set_entry_point("router")
-
-
-    # ✅ Conditional edges with CORRECT MAPPING
-    # def router_func(state: GraphState) -> str:
-    #     next_node = route_by_input_type(state)
-    #     print(f"➡️ [router_func] Moving to: {next_node}")
-    #     return next_node
-
-    # graph.add_conditional_edges("router", router_func, {
-    #     "LoadPDF": "ClassifyPages",
-    #     "summarize_news": END,
-    #     "answer_question": END
-    # })
 
     graph.add_edge("ClassifyPages", "ToSectionMap")
     graph.add_edge("ToSectionMap", "VectorIndexing")
