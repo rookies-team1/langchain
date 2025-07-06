@@ -128,20 +128,33 @@ def match_and_feedback(state: GraphState) -> GraphState:
     retriever = state["vectorstore"].as_retriever()
     qa_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever)
     prompt = f"""
-다음은 한 기업의 뉴스 기사 분석 내용입니다:
+    다음은 한 기업의 뉴스 기사 분석 내용입니다:
 
-"{state['company_analysis']}"
+    "{state['company_analysis']}"
 
-이력서/포트폴리오 항목별로 강조할 점, 부족한 점, 보완점을 구체적으로 작성해주세요.
-"""
-    feedback = qa_chain.run(prompt)
+    이력서/포트폴리오 항목별로 강조할 점, 부족한 점, 보완점을 구체적으로 작성해주세요.
+    """
+    raw_feedback = qa_chain.run(prompt)
+    feedback = clean_llm_output(raw_feedback)
     print("✅ 피드백 생성 완료")
     return {**state, "feedback": feedback}
 
+# def answer_question(state: GraphState) -> GraphState:
+#     retriever = state["vectorstore"].as_retriever()
+#     qa_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever)
+#     result = qa_chain.run(state["user_question"])
+#     print("✅ 질문 답변 생성 완료")
+#     return {**state, "answer": result}
+
 def answer_question(state: GraphState) -> GraphState:
-    retriever = state["vectorstore"].as_retriever()
-    qa_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever)
-    result = qa_chain.run(state["user_question"])
+    if state.get("vectorstore"):
+        retriever = state["vectorstore"].as_retriever()
+        qa_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever)
+        raw_result = qa_chain.run(state["user_question"])
+    else:
+        raw_result = llm_feedback.invoke(state["user_question"])
+
+    result = clean_llm_output(raw_result)
     print("✅ 질문 답변 생성 완료")
     return {**state, "answer": result}
 
@@ -149,6 +162,14 @@ def summarize_news(state: GraphState) -> GraphState:
     summary = f"[뉴스 요약] {state['user_question'][:50]}..."
     print("✅ 뉴스 요약 완료")
     return {**state, "news_summary": summary}
+
+def clean_llm_output(text: str) -> str:
+    # <think>...</think> 블록 제거
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # 불필요한 연속 줄바꿈 제거
+    text = re.sub(r"\n\s*\n", "\n\n", text)
+    # 양 끝 공백 제거
+    return text.strip()
 
 # --- 실행 함수 ---
 def run_langgraph_flow(user_question: str,
