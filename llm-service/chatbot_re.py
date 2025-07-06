@@ -69,23 +69,15 @@ split_prompt = ChatPromptTemplate.from_template("""
 chain_split = LLMChain(llm=llm_split, prompt=split_prompt)
 
 # --- 노드 정의 ---
-def route_by_input_type(state: GraphState) -> GraphState:
+def route_by_input_type(state: GraphState) -> str:
     result = route_chain.run(question=state["user_question"]).strip().lower()
     print(f"🪐 LLM 판단 결과: {result}")
-
     if "feedback" in result:
-        state = load_resume_pdf(state)
-        state = classify_by_page(state)
-        state = make_section_map(state)
-        state = vector_indexing(state)
-        state = load_company_analysis(state)
-        state = match_and_feedback(state)
+        return "LoadPDF"
     elif "qa" in result:
-        state = answer_question(state)
+        return "AnswerQuestion"
     else:
         raise ValueError(f"지원되지 않는 응답: {result}")
-
-    return state
 
 def load_resume_pdf(state: GraphState) -> GraphState:
     loader = PyPDFLoader(state["file_path"])
@@ -190,20 +182,37 @@ def run_langgraph_flow(user_question: str,
 
     graph = StateGraph(GraphState)
 
-    graph.add_node("router", route_by_input_type)
-    graph.add_node("ClassifyPages", classify_by_page)
-    graph.add_node("ToSectionMap", make_section_map)
-    graph.add_node("VectorIndexing", vector_indexing)
-    graph.add_node("LoadCompanyInfo", load_company_analysis)
-    graph.add_node("Feedback", match_and_feedback)
+    # graph.add_node("router", route_by_input_type)
+    # graph.add_node("ClassifyPages", classify_by_page)
+    # graph.add_node("ToSectionMap", make_section_map)
+    # graph.add_node("VectorIndexing", vector_indexing)
+    # graph.add_node("LoadCompanyInfo", load_company_analysis)
+    # graph.add_node("Feedback", match_and_feedback)
 
-    graph.set_entry_point("router")
+    # graph.set_entry_point("router")
 
+    # graph.add_edge("ClassifyPages", "ToSectionMap")
+    # graph.add_edge("ToSectionMap", "VectorIndexing")
+    # graph.add_edge("VectorIndexing", "LoadCompanyInfo")
+    # graph.add_edge("LoadCompanyInfo", "Feedback")
+    # graph.add_edge("Feedback", END)
+
+    graph.add_node("LoadPDF", load_resume_pdf)
+    graph.add_node("AnswerQuestion", answer_question)
+
+    # router 분기 처리
+    graph.add_conditional_edges("router", route_by_input_type, {
+        "LoadPDF": "ClassifyPages",
+        "AnswerQuestion": END
+    })
+
+    graph.add_edge("LoadPDF", "ClassifyPages")
     graph.add_edge("ClassifyPages", "ToSectionMap")
     graph.add_edge("ToSectionMap", "VectorIndexing")
     graph.add_edge("VectorIndexing", "LoadCompanyInfo")
     graph.add_edge("LoadCompanyInfo", "Feedback")
     graph.add_edge("Feedback", END)
+
 
     compiled = graph.compile()
     result = compiled.invoke(state)
