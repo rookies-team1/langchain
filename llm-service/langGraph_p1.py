@@ -65,16 +65,17 @@ llm, retriever, news_article = initialize_models_and_retriever()
 
 # --- 2. LangGraph 상태 정의 ---
 class GraphState(TypedDict):
-    user_input: str
-    input_type: str
-    question: str
-    uploaded_document: str
-    relevant_chunks: List[str]
-    answer: str
-    feedback: str
-    is_grounded: bool
-    news_article: str
-    chat_history: List[BaseMessage]
+    user_input: str # 유저 입력
+    input_type: str # 뉴스 Q&A or 문서 피드백 
+    question: str   # 정제된 질문
+    uploaded_document: str  # 업로드된 문서 (string or 경로)
+    relevant_chunks: List[str]  # 현재 검색기가 바라보고 있는 내용
+    answer: str # 답변
+    feedback: str   # 문서 피드백 답변
+    is_grounded: bool   # 답변 평가
+    news_article: str   # 뉴스 기사 원문
+    news_summarization: str # 뉴스 요약
+    chat_history: List[BaseMessage] # 채팅 기록
 
 # --- 3. LangGraph 노드 정의 ---
 def classify_input_node(state: GraphState):
