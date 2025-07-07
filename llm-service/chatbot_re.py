@@ -387,14 +387,14 @@ def run_langgraph_flow(user_question: str,
     graph.add_edge("AnswerQuestion", END)
 
     # 그래프 시각화
-    # app = graph.compile()
-    # try:
-    #     graph_image_path = "../langgraph_structure_nh.png"
-    #     with open(graph_image_path, "wb") as f:
-    #         f.write(app.get_graph().draw_mermaid_png())
-    #     print(f"LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
-    # except Exception as e:
-    #     print(f"그래프 시각화 중 오류 발생: {e}")
+    app = graph.compile()
+    try:
+        graph_image_path = "../langgraph_structure_nh.png"
+        with open(graph_image_path, "wb") as f:
+            f.write(app.get_graph().draw_mermaid_png())
+        print(f"LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
+    except Exception as e:
+        print(f"그래프 시각화 중 오류 발생: {e}")
 
     # 그래프 컴파일 및 실행
     compiled = graph.compile()
