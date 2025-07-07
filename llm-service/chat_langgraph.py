@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import sys
 
 from langchain_openai import ChatOpenAI
@@ -31,6 +32,7 @@ import re
 
 llm = None
 embeddings = None
+input_type = None
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -48,6 +50,7 @@ def initialize_models_and_retriever():
         model="meta-llama/llama-4-scout-17b-16e-instruct",
         temperature=0.7
     )
+    # llm = OllamaLLM(model="qwen3:1.7b")
     
     try:
         embeddings = OllamaEmbeddings(
@@ -75,7 +78,7 @@ class GraphState(TypedDict):
     user_question: Optional[str] # 사용자 질문
     company: Optional[str]    # 회사 이름
     chat_history: List[BaseMessage] # 대화 기록
-    file_path: Optional[str] # 첨부파일 경로
+    resume_path: Optional[str] # 첨부파일 경로
     pages: Optional[List] # 첨부파일 페이지 리스트
     classified: Optional[List] # 페이지 분류 결과
     section_map: Optional[Dict] # 섹션별 내용 맵핑
@@ -88,7 +91,6 @@ class GraphState(TypedDict):
     
     input_type: str # 뉴스 Q&A or 문서 피드백 
     question: str   # 정제된 질문
-    uploaded_document: str  # 업로드된 문서 (string or 경로)
     relevant_chunks: List[str]  # 현재 검색기가 바라보고 있는 내용
     is_grounded: bool   # 답변 평가
     news_article: str   # 뉴스 기사 원문
@@ -179,15 +181,19 @@ def router_node(state: GraphState) -> GraphState:
 
 def route_by_input_type(state: GraphState) -> GraphState:
     raw_result = route_chain.invoke({"question": state["user_question"]})
-    result = clean_llm_output(raw_result).strip().lower()
+    if isinstance(raw_result, dict) and "text" in raw_result:
+        raw_text = raw_result["text"]
+    else:
+        raw_text = raw_result
+    result = clean_llm_output(raw_text ).strip().lower()
     print(f"✅ LLM 분기 판단 결과 : {result}")
 
     if "feedback" in result:
         state["input_type"] = "feedback"
-        return state
+        return "feedback"
     elif "qa" in result:
         state["input_type"] = "qa"
-        return state
+        return "qa"
     else:
         raise ValueError(f"지원되지 않는 응답: {result}")
 
@@ -211,7 +217,7 @@ def retrieve_chunks_node(state: GraphState):
         return state
 
     question = state['question']
-    documents = retriever.invoke(question)
+    documents = retriever.get_relevant_documents(question)
     state['relevant_chunks'] = [doc.page_content for doc in documents]
     print(f" > ‘{question[:20]}...’에 대해 {len(documents)}개의 관련 문서를 찾았습니다.")
     return state
@@ -234,8 +240,12 @@ def generate_answer_node(state: GraphState):
         """
     )
     rag_chain = prompt | llm | StrOutputParser()
+    print("chat_history 타입 및 내용:")
+    for i, msg in enumerate(state['chat_history']):
+        print(f"  [{i}] type: {type(msg)}, content type: {type(msg.content)}, content: {repr(msg.content)[:100]}")
     answer = rag_chain.invoke({
-        "chat_history": "\n".join([f"{msg.type}: {msg.content}" for msg in state['chat_history']]),
+
+        "chat_history": "\n".join([f"{type(msg).__name__}: {str(msg.content)}" for msg in state['chat_history']]),
         "context": "\n---\n".join(state['relevant_chunks']),
         "question": state['question']
     })
@@ -278,15 +288,15 @@ def grade_answer_node(state: GraphState):
 
 # --- 3. 문서 피드백 ---
 def load_resume_file(state: GraphState) -> GraphState:
-    file_path = state["file_path"]
+    resume_path = state["resume_path"]
     pages = []
 
-    if file_path.lower().endswith(".pdf"):
-        loader = PyPDFLoader(file_path)
+    if resume_path.lower().endswith(".pdf"):
+        loader = PyPDFLoader(resume_path)
         pages = loader.load()
         print(f"✅ PDF {len(pages)} 페이지 로드 완료")
-    elif file_path.lower().endswith(".txt"):
-        with open(file_path, "r", encoding="utf-8") as f:
+    elif resume_path.lower().endswith(".txt"):
+        with open(resume_path, "r", encoding="utf-8") as f:
             text = f.read()
         # 텍스트 파일은 2000자 단위로 페이지로 나누어 처리 (필요 시 조정)
         text_splitter = RecursiveCharacterTextSplitter(
@@ -384,17 +394,6 @@ def match_and_feedback(state: GraphState) -> GraphState:
 
     resume_text = "\n\n".join(resume_contents)
 
-    # 벡터스토어에서 뉴스 주요 내용 추출
-    # news_contents = []
-    # if state.get("news_vectorstore"):
-    #     docs = state["news_vectorstore"].similarity_search(
-    #         state["user_question"],
-    #         k=3
-    #     )
-    #     news_contents = [doc.page_content for doc in docs]
-
-    # news_texts = "\n\n".join(news_contents)
-
     prompt = f"""
     당신은 사용자의 질문, 관련 뉴스 기사, 첨부된 파일 내용을 모두 통합하여 피드백을 작성하는 전문 분석가입니다.
 
@@ -426,10 +425,28 @@ def match_and_feedback(state: GraphState) -> GraphState:
 def run_workflow(
                 user_question: str,
                 resume_path: Optional[str] = None,
-                news_content: Optional[str] = None,
+                news_article: Optional[str] = None,
                 news_summary_path: Optional[str] = None,
-                chat_history: Optional[List[BaseMessage]] = None ):
+                chat_history: Optional[List[BaseMessage]] = None )-> Dict:
     
+    state: GraphState = {
+            "user_question": user_question,
+            "chat_history": chat_history or [],
+            "resume_path": resume_path, 
+            "news_article": news_article,
+        }
+    
+    # 이력서 경로가 있으면 로드
+    if resume_path and Path(resume_path).exists():
+        state["resume_path"] = resume_path
+
+    # 뉴스 요약 json 경로가 있으면 로드
+    if news_summary_path and Path(news_summary_path).exists():
+        with open(news_summary_path, "r", encoding="utf-8") as f:
+            news_json = json.load(f)
+            state["company_analysis"] = news_json.get("summary") or news_json.get("content")
+
+
     # LangGraph 객체 생성
     graph = StateGraph(GraphState)
     
@@ -454,7 +471,7 @@ def run_workflow(
     # 라우팅 조건 설정: qa or feedback
     graph.add_conditional_edges(
         "router",
-        lambda state: state["input_type"],
+        route_by_input_type,
         {
             "feedback": "LoadFile",
             "qa": "retrieve_chunks"
@@ -482,23 +499,24 @@ def run_workflow(
     graph.add_edge("Feedback", END)
     
     app = graph.compile()
-    return app
+    result = app.invoke(state)
+    return result
     
     
-if __name__ == "__main__":
-    app = run_workflow(
-        user_question="",
-        resume_path="./file_data/이력서_이준기.pdf",
-        news_content=None,
-        news_summary_path="./news_data/news_sample1_summary.json",
-        chat_history=None
-    )
+# if __name__ == "__main__":
+#     app = run_workflow(
+#         user_question="",
+#         resume_path="./file_data/이력서_이준기.pdf",
+#         news_article=None,
+#         news_summary_path="./news_data/news_sample1_summary.json",
+#         chat_history=None
+#     )
     
-     # 그래프 시각화
-    try:
-        graph_image_path = "langgraph_structure_new.png"
-        with open(graph_image_path, "wb") as f:
-            f.write(app.get_graph().draw_mermaid_png())
-        print(f"LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
-    except Exception as e:
-        print(f"그래프 시각화 중 오류 발생: {e}")
+#      # 그래프 시각화
+#     try:
+#         graph_image_path = "langgraph_structure_new.png"
+#         with open(graph_image_path, "wb") as f:
+#             f.write(app.get_graph().draw_mermaid_png())
+#         print(f"LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
+#     except Exception as e:
+#         print(f"그래프 시각화 중 오류 발생: {e}")

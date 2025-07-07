@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from summarizer import summarize_news
 from chatbot_re import run_langgraph_flow
 from langGraph_p1 import run_chat_graph
-from chat_langgraph import main
+from chat_langgraph import run_workflow
 from typing import List, TypedDict, Optional
 import os
 
@@ -37,17 +37,17 @@ class ChatResponse(BaseModel):
     answer: str     # 답변
     # timestamp (필요하면)
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+# @app.post("/chat", response_model=ChatResponse)
+# async def chat_endpoint(request: ChatRequest):
 
-    # LangGraph를 사용하여 답변 생성
-    ai_response = run_chat_graph(
-        user_input=request.user_input,
-        news_content=request.news_content,
-        chat_history=request.chat_history
-    )
+#     # LangGraph를 사용하여 답변 생성
+#     ai_response = run_chat_graph(
+#         user_input=request.user_input,
+#         news_content=request.news_content,
+#         chat_history=request.chat_history
+#     )
 
-    return ChatResponse(question=request.user_input, answer=ai_response, session_id=request.session_id)
+#     return ChatResponse(question=request.user_input, answer=ai_response, session_id=request.session_id)
 
 
 # =========================== summarizer POST 요청 처리 ===========================
@@ -71,16 +71,16 @@ async def summarize(news: News):
 class ChatbotRequest(BaseModel):
     user_question: str
     resume_path: str = None  # optional
-    news_content: str = None
+    news_article: str = None
     news_summary_path: str
 
 @app.post("/chatbot")
 def chatbot_router(request: ChatbotRequest):
     try:
-        result = main(
+        result = run_workflow(
             user_question=request.user_question,
             resume_path=request.resume_path,
-            news_content=request.news_content,
+            news_article=request.news_article,
             news_summary_path=request.news_summary_path
         )
         return {

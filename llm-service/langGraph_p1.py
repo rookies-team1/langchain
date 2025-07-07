@@ -10,6 +10,8 @@ poetry run python llm-service/langGraph_p1.py
 import os
 import sys
 
+from langchain_openai import ChatOpenAI
+
 # llm-service 디렉토리를 sys.path에 추가
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
@@ -25,15 +27,22 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langgraph.graph import StateGraph, END
 
-from modules.load_llm import load_llm
+# from .modules.load_llm import load_llm
 
 embeddings = None
 
 # --- 1. 설정 및 초기화 ---
 def initialize_models_and_retriever():
-    load_dotenv()
     
-    llm = load_llm()
+    load_dotenv()
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    
+    llm = ChatOpenAI(
+        api_key=OPENAI_API_KEY,
+        base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        temperature=0.7
+    )
     
     try:
         embeddings = OllamaEmbeddings(
