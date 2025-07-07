@@ -44,13 +44,13 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 def initialize_models_and_retriever():
     load_dotenv()
     
-    llm = ChatOpenAI(
-        api_key=OPENAI_API_KEY,
-        base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
-        temperature=0.7
-    )
-    # llm = OllamaLLM(model="qwen3:1.7b")
+    # llm = ChatOpenAI(
+    #     api_key=OPENAI_API_KEY,
+    #     base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
+    #     model="meta-llama/llama-4-scout-17b-16e-instruct",
+    #     temperature=0.7
+    # )
+    llm = OllamaLLM(model="qwen3:1.7b")
     
     try:
         embeddings = OllamaEmbeddings(
@@ -240,14 +240,11 @@ def generate_answer_node(state: GraphState):
         """
     )
     rag_chain = prompt | llm | StrOutputParser()
-    print("chat_history 타입 및 내용:")
-    for i, msg in enumerate(state['chat_history']):
-        print(f"  [{i}] type: {type(msg)}, content type: {type(msg.content)}, content: {repr(msg.content)[:100]}")
+    # AIMessage, HumanMessage → 문자열로 변환
     answer = rag_chain.invoke({
-
-        "chat_history": "\n".join([f"{type(msg).__name__}: {str(msg.content)}" for msg in state['chat_history']]),
+        "chat_history": "\n".join([f"{msg.type}: {msg.content}" for msg in state['chat_history']]),
         "context": "\n---\n".join(state['relevant_chunks']),
-        "question": state['question']
+        "question": state['user_question']
     })
     state['answer'] = answer
     # print(f" > 생성된 답변: {answer[:30]}...")
@@ -273,7 +270,7 @@ def grade_answer_node(state: GraphState):
     grading_chain = prompt | llm | StrOutputParser()
     grade = grading_chain.invoke({
         "context": "\n---\n".join(state['relevant_chunks']),
-        "question": state['question'],
+        "question": state['user_question'],
         "answer": state['answer']
     })
     
@@ -345,7 +342,9 @@ def classify_by_page(state: GraphState) -> GraphState:
                 })
 
     # 분류 결과 출력
-    output_path = "./file_data/classified_pages.json"
+    # output_path = "./file_data/{resume_path.name}.json"
+    resume_path = state["resume_path"]
+    output_path = f"./file_data/{Path(resume_path).stem}.json"
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     print(f"✅ 분류 결과가 '{output_path}' 파일로 저장되었습니다.")
