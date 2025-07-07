@@ -62,6 +62,7 @@ def initialize_models_and_retriever():
 
 llm, retriever, news_article = initialize_models_and_retriever()
 
+
 # --- 2. LangGraph 상태 정의 ---
 class GraphState(TypedDict):
     user_input: str
@@ -81,6 +82,7 @@ def classify_input_node(state: GraphState):
     user_input = state['user_input']
     if "지원서" in user_input or "피드백" in user_input or ".txt" in user_input:
         state['input_type'] = "document"
+        # 문서 저장 방식 
         state['uploaded_document'] = "(지원서 내용)"
         print(" > 유형: 문서 피드백")
     else:
