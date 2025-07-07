@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from summarizer import summarize_news
 from chatbot_re import run_langgraph_flow
 
+
 app = FastAPI(title="AI Agent API")
 
 @app.get("/")

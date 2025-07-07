@@ -19,6 +19,7 @@ uvicorn = ">=0.20.0,<0.21.0"
 python-dotenv = ">=1.0.0,<2.0.0"
 langchain-groq = "^0.3.5"
 langchain-ollama = "^0.3.3"
+graphviz = "^0.21"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

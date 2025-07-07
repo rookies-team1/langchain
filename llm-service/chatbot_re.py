@@ -16,6 +16,8 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_ollama import OllamaLLM
 from langchain_core.messages import BaseMessage
 import re
+import matplotlib.pyplot as plt
+
 
 # Load API key and suppress warnings
 load_dotenv()
@@ -171,6 +173,16 @@ def clean_llm_output(text: str) -> str:
     return text.strip()
 
 
+def visualize_graph_manual(graph, output_path="graph_flow_manual.png"):
+    nx_graph = graph.get_graph()
+    pos = nx.spring_layout(nx_graph)
+    plt.figure(figsize=(12, 8))
+    nx.draw(nx_graph, pos, with_labels=True, node_size=3000, node_color='lightblue', font_size=10, font_weight='bold')
+    plt.savefig(output_path)
+    plt.close()
+    print(f"✅ 그래프 수동 시각화 완료: {output_path}")
+
+
 # --- 실행 함수 ---
 def run_langgraph_flow(user_question: str,
                        resume_path: Optional[str] = None,
@@ -223,6 +235,8 @@ def run_langgraph_flow(user_question: str,
 
     graph.add_edge("AnswerQuestion", END)
 
+
+    visualize_graph_manual(graph, "langgraph_flow_manual.png")
 
     compiled = graph.compile()
     result = compiled.invoke(state)
