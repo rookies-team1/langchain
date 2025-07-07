@@ -27,7 +27,7 @@
   {
     "page": 1,
     "category": "프로젝트",
-    "content": "사물인터넷 공모전 참여[ (IoT) ] 주제 온습도 자동제어 환기 시스템 : (2022.10) 성과 우수상 수상"
+    "content": "사물인터넷 공모전 참여[ (IoT) ] 주제 온습도 자동제어 환기 시스템 : (2022.10) 성과 우수상 수상 대전 창의융합캠프: ( IoT )"
   },
   {
     "page": 1,
@@ -42,7 +42,7 @@
   {
     "page": 1,
     "category": "기타활동",
-    "content": "한밭대 로봇 동아리 회장 - 'HBOT' (2021.03 ~2022.02) 교내 메이커톤 참가 및 지도교수상 수상 학부생 회원 - IEEE (Student Member)"
+    "content": "한밭대 로봇 동아리 회장 - 'HBOT' (2021.03 ~2022.02) 교내 메이커톤 참가 및 지도교수상 수상 - 학부생 회원 - IEEE (Student Member)"
   },
   {
     "page": 1,
@@ -52,22 +52,27 @@
   {
     "page": 2,
     "category": "자기소개",
-    "content": "끊임없이 배우고 실험하며 성장하는 전자전기공학도입니다"
-  },
-  {
-    "page": 2,
-    "category": "기술 스택",
-    "content": "임베디드 시스템과 반도체 소자, Arduino Raspberry Pi"
-  },
-  {
-    "page": 2,
-    "category": "프로젝트",
-    "content": "캡스톤 디자인 프로젝트를 통해 팀 리딩과 프로젝트 일정 관리 경험도 쌓았으며 문제 해결, 력과 책임감을 바탕으로 기술적 도전에 적극적으로 대응합니다."
+    "content": "끊임없이 배우고 실험하며 성장하는 전자전기공학도입니다 임베디드 시스템과 반도체 소자. 에 깊은 관심이 있으며 및 기반의 하드웨어 제어 프로젝트를 수행하, Arduino Raspberry Pi 며 실무 역량을 키웠습니다. 캡스톤 디자인 프로젝트를 통해 팀 리딩과 프로젝트 일정 관리 경험도 쌓았으며 문제 해결, 력과 책임감을 바탕으로 기술적 도전에 적극적으로 대응합니다."
   },
   {
     "page": 2,
     "category": "Unknown",
     "content": ""
+  },
+  {
+    "page": 2,
+    "category": "Unknown",
+    "content": ""
+  },
+  {
+    "page": 2,
+    "category": "Unknown",
+    "content": ""
+  },
+  {
+    "page": 2,
+    "category": "기술 스택",
+    "content": "Arduino, Raspberry Pi"
   },
   {
     "page": 2,

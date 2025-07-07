@@ -4,10 +4,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_ollama import OllamaLLM
-<<<<<<< Updated upstream
-=======
 import re
->>>>>>> Stashed changes
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -34,19 +31,7 @@ prompt = PromptTemplate(
     {content}
     """)                                     
 
-<<<<<<< Updated upstream
-# Groq API를 사용하는 ChatOpenAI 인스턴스 생성
-# llm = ChatOpenAI(
-#     api_key=OPENAI_API_KEY,
-#     base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
-#     model="meta-llama/llama-4-scout-17b-16e-instruct",
-#     temperature=0.7
-# )
-
-llm = OllamaLLM(model="bge-m3:latest")
-=======
 llm = OllamaLLM(model = "qwen3:1.7b")
->>>>>>> Stashed changes
 
 # chain 연결 (LCEL) prompt + llm + outputparser
 output_parser = StrOutputParser()
