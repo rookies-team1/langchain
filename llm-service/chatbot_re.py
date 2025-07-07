@@ -90,13 +90,13 @@ route_prompt = ChatPromptTemplate.from_template("""
 route_chain = LLMChain(llm=llm_split, prompt=route_prompt)
 
 split_prompt = ChatPromptTemplate.from_template("""
-    아래는 이력서의 한 페이지 텍스트입니다.
+    아래는 사용자의 이력서 혹은 포트폴리오에 포함된 한 분단 텍스트입니다.
 
     =======================
     {page_text}
     =======================
 
-    텍스트를 아래 항목들로 내용을 나누어 각각 해당하는 부분의 원문 내용을 최대한 그대로 추출해 주세요:
+    이 텍스트를 아래 항목 중 해당하는 항목에 대응되도록 **원문 내용을 최대한 그대로** 추출해 주세요:
 
     - 인적사항
     - 학력
@@ -106,7 +106,9 @@ split_prompt = ChatPromptTemplate.from_template("""
     - 수상 및 자격증
     - 자기소개
 
-    다음 JSON 배열 형식으로만 출력하세요.
+    만약 위 항목 중 어떤 항목에도 딱 맞지 않더라도, **텍스트를 절대 버리지 말고** 적절한 항목 이름을 설정하여 반드시 포함해 주세요.
+
+    아래와 같은 JSON 배열 형식으로만 출력하세요:
 
     [
         {{
@@ -119,9 +121,12 @@ split_prompt = ChatPromptTemplate.from_template("""
         }}
     ]
 
-    대응되는 항목이 없으면 Unknown 항목으로 추출해 주세요.
-    반드시 JSON 배열만 출력하고 다른 설명은 절대 추가하지 마세요.
+    **규칙:**
+    - 반드시 JSON 배열만 출력하고 다른 설명은 절대 출력하지 마세요.
+    - 대응되는 내용이 없는 항목은 출력하지 않아도 됩니다.
+    - 그러나 입력된 텍스트 중 어느 항목에도 해당하지 않는 부분이 있다면 적절한 새로운 category로 반드시 출력해 주세요. 
 """)
+
 
 
 
@@ -132,7 +137,7 @@ chain_split = LLMChain(llm=llm_split, prompt=split_prompt)
 def route_by_input_type(state: GraphState) -> str:
     raw_result = route_chain.run(question=state["user_question"])
     result = clean_llm_output(raw_result).strip().lower()
-    print(f"🪐 LLM 판단 결과 : {result} ({type(result)})")
+    print(f"✅ LLM 분기 판단 결과 : {result}")
 
     if "feedback" in result:
         return "feedback"
@@ -157,40 +162,24 @@ def classify_by_page(state: GraphState) -> GraphState:
     # 각 페이지를 LLM을 사용해 항목별로 분류
     results = []
     for idx, page in enumerate(state["pages"]):
-    #     print(f"--- 페이지 {idx + 1} 분류 중 ---")
-    #     print(f"페이지 내용:\n{page.page_content.strip()[:1000]}...")  # 처음 1000자만 출력
-    #     raw_res = chain_split.invoke({"page_text": page.page_content.strip()})
-    #     print(f"🪐 LLM 출력 결과: {raw_res}")
 
-    #     try:
-    #         parsed_res = json.loads(raw_res)
-    #         for item in parsed_res:
-    #             results.append({
-    #                 "page": idx + 1,
-    #                 "category": item["category"],
-    #                 "content": item["content"].strip()
-    #             })
-    #     except Exception as e:
-    #         # 파싱 실패 시 페이지 전체를 unknown으로 저장해 추후 확인 가능
-    #         print(f"⚠️ JSON 파싱 실패: {e}")
-    #         print(f"⚠️ LLM 원본 출력:\n{raw_res}")
-    #         results.append({
-    #             "page": idx + 1,
-    #             "category": "Unknown",
-    #             "content": page.page_content.strip()
-    #         })
-
-        paragraphs = [p.strip() for p in page.page_content.strip().split("\n\n+") if p.strip()]
-
+        paragraphs = [p.strip() for p in page.page_content.strip().split("\n\n+") if p.strip()] # 페이지 내용을 문단 단위로 분리 - \n 2개이상
+        
+        # 문장 중간에 끼어있는 \n을 제거하여 문장이 끊기지 않도록 처리
+        for i in range(len(paragraphs)):
+            # 문장 끝(., ?, !)이 아닌 곳의 \n은 공백으로 치환
+            paragraphs[i] = re.sub(r'(?<![.!?])\n(?!\n)', ' ', paragraphs[i])
+            
         for p_idx, paragraph in enumerate(paragraphs):
-            print(f"--- 페이지 {idx + 1}, 블록 {p_idx + 1} 분류 중 ---")
-            print(f"블록 내용: {paragraph[:300]}...")  # 과도한 출력 방지
+            # print(f"--- 페이지 {idx + 1}, 블록 {p_idx + 1} 분류 중 ---")
+            # print(f"블록 내용: {paragraph[:100]}...")
             raw_res = chain_split.invoke({"page_text": paragraph})
-            print(f"🪐 LLM 출력 결과: {raw_res}")
+            # print(f" LLM 출력 결과: {raw_res}")
 
-            try:
+            try: # JSON 파싱 시도
                 parsed_res = json.loads(raw_res["text"] if isinstance(raw_res, dict) and "text" in raw_res else raw_res)
                 for item in parsed_res:
+                    # 각 항목을 results 리스트에 추가
                     results.append({
                         "page": idx + 1,
                         "category": item["category"],
@@ -198,14 +187,13 @@ def classify_by_page(state: GraphState) -> GraphState:
                     })
             except Exception as e:
                 print(f"⚠️ JSON 파싱 실패: {e}")
-                print(f"⚠️ LLM 원본 출력:\n{raw_res}")
                 results.append({
                     "page": idx + 1,
                     "category": "Unknown",
                     "content": paragraph
                 })
 
-
+    # 분류 결과 출력
     output_path = "./file_data/classified_pages.json"
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
@@ -215,11 +203,12 @@ def classify_by_page(state: GraphState) -> GraphState:
 
 
 def make_section_map(state: GraphState) -> GraphState:
-    # 분류된 페이지 내용을 섹션별로 묶음
+    # 분류된 페이지 내용을 같은 항목별로 묶음
     section_map = defaultdict(list)
     for item in state["classified"]:
         section = item["category"].split(":")[0].strip()
         section_map[section].append(item["content"])
+    print("✅ 섹션 맵 생성 완료 section_map:", section_map)
     return {**state, "section_map": dict(section_map)}
 
 
@@ -234,29 +223,53 @@ def vector_indexing(state: GraphState) -> GraphState:
     vectorstore = FAISS.from_texts(texts, embeddings, metadatas)
     return {**state, "vectorstore": vectorstore}
 
+
 def load_company_analysis(state: GraphState) -> GraphState:
     # 회사 분석 요약 로드 (이 단계에서 추가 작업은 없지만 구조상 필요)
     return state
 
 def match_and_feedback(state: GraphState) -> GraphState:
-    # 뉴스 요약 + 이력서 내용 + 질문 기반으로 LLM이 피드백 생성
+    # 뉴스 요약 + 첨부파일 내용 + 질문 기반으로 LLM이 피드백 생성
+
     retriever = state["vectorstore"].as_retriever()
-    qa_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever)
+    feedback_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever)
+
+    # 벡터스토어에서 이력서/포트폴리오 주요 내용 추출
+    resume_contents = []
+    if state.get("vectorstore"):
+        docs = state["vectorstore"].similarity_search(
+            state["user_question"],
+            k=5
+        )
+        resume_contents = [doc.page_content for doc in docs]
+
+    resume_text = "\n\n".join(resume_contents)
 
     prompt = f"""
+    당신은 사용자의 질문, 관련 뉴스 기사, 첨부된 파일 내용을 모두 통합하여 피드백을 작성하는 전문 분석가입니다.
+
     다음은 사용자 질문입니다:
     \"\"\"{state['user_question']}\"\"\"
 
-    아래는 한 기업의 뉴스 기사 분석 내용입니다:
+    다음은 해당 기업의 최근 뉴스 기사 요약입니다:
     \"\"\"{state['company_analysis']}\"\"\"
 
-    그리고 첨부된 이력서 또는 포트폴리오 내용을 바탕으로 한 정보가 포함되어 있습니다.
+    다음은 첨부된 이력서 또는 포트폴리오의 주요 내용 요약입니다:
+    \"\"\"{resume_text}\"\"\"
 
-    뉴스 기사 내용과 첨부 파일의 내용을 모두 고려하여,  
-    사용자 질문에 대해 이력서/포트폴리오 항목별로 강조할 점, 부족한 점, 보완할 점을 구체적이고 명확하게 작성해 주세요.
+    위의 모든 정보를 바탕으로 다음 사항을 충실히 반영해 작성해 주세요:
+    1. **질문에 대한 정확한 답변**과 함께 맥락을 구체적으로 설명할 것.
+    2. 뉴스 기사 분석 내용을 반영해 사용자 질문과 연관된 인사이트가 있으면 언급할 것.
+    3. 첨부 파일 내용(이력서/포트폴리오) 기반으로 강점, 보완할 점, 개선 방향을 항목별로 구체적으로 작성할 것.
+    4. 각 항목별로 '강점', '부족한 점', '보완 방안'으로 나누어 깔끔하게 정리할 것.
+    5. 구체적이며 명확하고, 실제 면접 또는 준비에 실질적으로 도움이 되는 형태로 작성할 것.
     """
-    raw_feedback = qa_chain.run(prompt)
-    feedback = clean_llm_output(raw_feedback)
+
+    print("피드백 생성 중...")
+    print(f"resume text: {resume_text}")
+
+    raw_feedback = feedback_chain.invoke({"query": prompt})
+    feedback = clean_llm_output(raw_feedback["result"])
     print("✅ 피드백 생성 완료")
     return {**state, "feedback": feedback}
 
