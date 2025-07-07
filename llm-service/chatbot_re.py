@@ -50,7 +50,8 @@ class GraphState(TypedDict):
     pages: Optional[List] # 첨부파일 페이지 리스트
     classified: Optional[List] # 페이지 분류 결과
     section_map: Optional[Dict] # 섹션별 내용 맵핑
-    vectorstore: Optional[Any]  # 벡터 스토어 (FAISS)
+    news_vectorstore: Optional[Any] # 뉴스 전문 벡터 스토어 (FAISS)
+    resume_vectorstore: Optional[Any] # 첨부파일 벡터 스토어 (FAISS)
     company_analysis: Optional[str] # 기업 분석 내용
     news_summary: Optional[str] # 뉴스 요약 내용
     feedback: Optional[str] # 피드백 내용
@@ -68,6 +69,10 @@ def clean_llm_output(text: str) -> str:
     text = re.sub(r"```(?:markdown)?\s*(.*?)```", r"\1", text, flags=re.DOTALL | re.IGNORECASE)
     # 연속되는 3줄 이상 줄바꿈은 2줄로 축소
     text = re.sub(r"\n{3,}", "\n\n", text)
+     # ```json ... ``` 등 코드블록 제거
+    text = re.sub(r"```json?(.*?)```", r"\1", text, flags=re.DOTALL|re.IGNORECASE)
+    # 혹은 ``` ... ``` 전체 제거
+    text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
     # 필요 없는 선두/후미 공백 제거
     return text.strip()
 
@@ -90,23 +95,24 @@ route_prompt = ChatPromptTemplate.from_template("""
 route_chain = LLMChain(llm=llm_split, prompt=route_prompt)
 
 split_prompt = ChatPromptTemplate.from_template("""
-    아래는 사용자의 이력서 혹은 포트폴리오에 포함된 한 분단 텍스트입니다.
+    아래는 사용자의 이력서 혹은 포트폴리오의 일부 텍스트입니다.
 
     =======================
     {page_text}
     =======================
 
-    이 텍스트를 아래 항목 중 해당하는 항목에 대응되도록 **원문 내용을 최대한 그대로** 추출해 주세요:
-
+    이 텍스트를 아래 항목 중 해당하는 항목에 대응되도록 **원문 내용을 그대로** 추출해 주세요:
+    만약 아래 항목 중 어떤 항목에도 딱 맞지 않더라도, **텍스트를 절대 버리지 말고** 적절한 항목 이름을 새로 설정하여 반드시 포함허거나 기타 항목으로 대응시켜 주세요.
+    
     - 인적사항
     - 학력
     - 경력
+    - 자기소개
     - 프로젝트
+    - 대외활동
     - 기술 스택
     - 수상 및 자격증
-    - 자기소개
-
-    만약 위 항목 중 어떤 항목에도 딱 맞지 않더라도, **텍스트를 절대 버리지 말고** 적절한 항목 이름을 설정하여 반드시 포함해 주세요.
+    - 기타
 
     아래와 같은 JSON 배열 형식으로만 출력하세요:
 
@@ -123,10 +129,8 @@ split_prompt = ChatPromptTemplate.from_template("""
 
     **규칙:**
     - 반드시 JSON 배열만 출력하고 다른 설명은 절대 출력하지 마세요.
-    - 대응되는 내용이 없는 항목은 출력하지 않아도 됩니다.
-    - 그러나 입력된 텍스트 중 어느 항목에도 해당하지 않는 부분이 있다면 적절한 새로운 category로 반드시 출력해 주세요. 
+    - 그러나 입력된 텍스트 중 어느 항목에도 해당하지 않는 부분이 있다면 적절한 새로운 항목으로 분류하여 반드시 출력해 주세요. 
 """)
-
 
 
 
@@ -159,31 +163,29 @@ def load_resume_pdf(state: GraphState) -> GraphState:
     return {**state, "pages": pages}
 
 def classify_by_page(state: GraphState) -> GraphState:
-    # 각 페이지를 LLM을 사용해 항목별로 분류
     results = []
     for idx, page in enumerate(state["pages"]):
-
-        paragraphs = [p.strip() for p in page.page_content.strip().split("\n\n+") if p.strip()] # 페이지 내용을 문단 단위로 분리 - \n 2개이상
+        paragraphs = [p.strip() for p in re.split(r"\n{2,}", page.page_content.strip()) if p.strip()]  # \n 2개 이상으로 분리
         
-        # 문장 중간에 끼어있는 \n을 제거하여 문장이 끊기지 않도록 처리
+        # 문장 중간 \n 제거
         for i in range(len(paragraphs)):
-            # 문장 끝(., ?, !)이 아닌 곳의 \n은 공백으로 치환
             paragraphs[i] = re.sub(r'(?<![.!?])\n(?!\n)', ' ', paragraphs[i])
-            
+        
         for p_idx, paragraph in enumerate(paragraphs):
-            # print(f"--- 페이지 {idx + 1}, 블록 {p_idx + 1} 분류 중 ---")
-            # print(f"블록 내용: {paragraph[:100]}...")
             raw_res = chain_split.invoke({"page_text": paragraph})
-            # print(f" LLM 출력 결과: {raw_res}")
 
-            try: # JSON 파싱 시도
-                parsed_res = json.loads(raw_res["text"] if isinstance(raw_res, dict) and "text" in raw_res else raw_res)
+            try:
+                raw_text = raw_res["text"] if isinstance(raw_res, dict) and "text" in raw_res else raw_res
+                parsed_res = json.loads(raw_text)
                 for item in parsed_res:
-                    # 각 항목을 results 리스트에 추가
+                    category = item.get("category", "").strip()
+                    content = item.get("content", "").strip()
+                    if not category:
+                        category = "Uncategorized"  # 적절한 기본 카테고리명으로 변경 가능
                     results.append({
                         "page": idx + 1,
-                        "category": item["category"],
-                        "content": item["content"].strip()
+                        "category": category,
+                        "content": content
                     })
             except Exception as e:
                 print(f"⚠️ JSON 파싱 실패: {e}")
@@ -220,8 +222,8 @@ def vector_indexing(state: GraphState) -> GraphState:
         for content in contents:
             texts.append(content)
             metadatas.append({"section": section})
-    vectorstore = FAISS.from_texts(texts, embeddings, metadatas)
-    return {**state, "vectorstore": vectorstore}
+    resume_vectorstore = FAISS.from_texts(texts, embeddings, metadatas)
+    return {**state, "resume_vectorstore": resume_vectorstore}
 
 
 def load_company_analysis(state: GraphState) -> GraphState:
@@ -231,19 +233,30 @@ def load_company_analysis(state: GraphState) -> GraphState:
 def match_and_feedback(state: GraphState) -> GraphState:
     # 뉴스 요약 + 첨부파일 내용 + 질문 기반으로 LLM이 피드백 생성
 
-    retriever = state["vectorstore"].as_retriever()
-    feedback_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever)
+    retriever_resume = state["resume_vectorstore"].as_retriever()
+    feedback_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever_resume)
 
     # 벡터스토어에서 이력서/포트폴리오 주요 내용 추출
     resume_contents = []
-    if state.get("vectorstore"):
-        docs = state["vectorstore"].similarity_search(
+    if state.get("resume_vectorstore"):
+        docs = state["resume_vectorstore"].similarity_search(
             state["user_question"],
-            k=5
+            k=7
         )
         resume_contents = [doc.page_content for doc in docs]
 
     resume_text = "\n\n".join(resume_contents)
+
+    # 벡터스토어에서 뉴스 주요 내용 추출
+    news_contents = []
+    if state.get("news_vectorstore"):
+        docs = state["news_vectorstore"].similarity_search(
+            state["user_question"],
+            k=7
+        )
+        news_contents = [doc.page_content for doc in docs]
+
+    news_texts = "\n\n".join(news_contents)
 
     prompt = f"""
     당신은 사용자의 질문, 관련 뉴스 기사, 첨부된 파일 내용을 모두 통합하여 피드백을 작성하는 전문 분석가입니다.
@@ -252,7 +265,7 @@ def match_and_feedback(state: GraphState) -> GraphState:
     \"\"\"{state['user_question']}\"\"\"
 
     다음은 해당 기업의 최근 뉴스 기사 요약입니다:
-    \"\"\"{state['company_analysis']}\"\"\"
+    \"\"\"{news_texts}\"\"\"
 
     다음은 첨부된 이력서 또는 포트폴리오의 주요 내용 요약입니다:
     \"\"\"{resume_text}\"\"\"
@@ -266,7 +279,7 @@ def match_and_feedback(state: GraphState) -> GraphState:
     """
 
     print("피드백 생성 중...")
-    print(f"resume text: {resume_text}")
+    print(f"news_texts: {news_texts}")
 
     raw_feedback = feedback_chain.invoke({"query": prompt})
     feedback = clean_llm_output(raw_feedback["result"])
@@ -276,9 +289,9 @@ def match_and_feedback(state: GraphState) -> GraphState:
 def answer_question(state: GraphState) -> GraphState:
     # 일반 질문에 대한 답변 생성
     # 벡터스토어가 있으면 Retrieval QA로, 없으면 LLM으로 직접 응답 생성
-    if state.get("vectorstore"):
-        retriever = state["vectorstore"].as_retriever()
-        qa_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=retriever)
+    if state.get("news_vectorstore"):
+        news_retriever = state["news_vectorstore"].as_retriever()
+        qa_chain = RetrievalQA.from_chain_type(llm=llm_feedback, retriever=news_retriever)
         raw_result = qa_chain.run(state["user_question"])
     else:
         raw_result = llm_feedback.invoke(state["user_question"])
@@ -313,8 +326,8 @@ def run_langgraph_flow(user_question: str,
         with open(news_full_path, "r", encoding="utf-8") as f:
             full_news_text = f.read()
         embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
-        vectorstore = FAISS.from_texts([full_news_text], embeddings)
-        state["vectorstore"] = vectorstore
+        news_vectorstore = FAISS.from_texts([full_news_text], embeddings)
+        state["news_vectorstore"] = news_vectorstore
 
     # LangGraph 객체 생성
     graph = StateGraph(GraphState)
@@ -351,9 +364,8 @@ def run_langgraph_flow(user_question: str,
 
     # 그래프 시각화
     # app = graph.compile()
-
     # try:
-    #     graph_image_path = "langgraph_structure_nh.png"
+    #     graph_image_path = "../langgraph_structure_nh.png"
     #     with open(graph_image_path, "wb") as f:
     #         f.write(app.get_graph().draw_mermaid_png())
     #     print(f"LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
