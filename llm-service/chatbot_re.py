@@ -155,12 +155,37 @@ def router_node(state: GraphState) -> GraphState:
     # Entry point 역할, 상태 그대로 전달만 하면 됨
     return state
 
-def load_resume_pdf(state: GraphState) -> GraphState:
-    # PDF 파일을 로드하여 페이지별 객체 리스트 생성
-    loader = PyPDFLoader(state["file_path"])
-    pages = loader.load()
-    print(f"✅ {len(pages)} 페이지 로드 완료")
+# def load_resume_pdf(state: GraphState) -> GraphState:
+#     # PDF 파일을 로드하여 페이지별 객체 리스트 생성
+#     loader = PyPDFLoader(state["file_path"])
+#     pages = loader.load()
+#     print(f"✅ {len(pages)} 페이지 로드 완료")
+#     return {**state, "pages": pages}
+
+
+def load_resume_file(state: GraphState) -> GraphState:
+    file_path = state["file_path"]
+    pages = []
+
+    if file_path.lower().endswith(".pdf"):
+        loader = PyPDFLoader(file_path)
+        pages = loader.load()
+        print(f"✅ PDF {len(pages)} 페이지 로드 완료")
+    elif file_path.lower().endswith(".txt"):
+        with open(file_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        # 텍스트 파일은 2000자 단위로 페이지로 나누어 처리 (필요 시 조정)
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=2000,
+            chunk_overlap=100
+        )
+        pages = text_splitter.create_documents([text])
+        print(f"✅ TXT {len(pages)} 페이지(청크) 로드 완료")
+    else:
+        raise ValueError("지원하지 않는 파일 형식입니다. pdf 또는 txt만 지원합니다.")
+
     return {**state, "pages": pages}
+
 
 def classify_by_page(state: GraphState) -> GraphState:
     results = []
@@ -210,7 +235,7 @@ def make_section_map(state: GraphState) -> GraphState:
     for item in state["classified"]:
         section = item["category"].split(":")[0].strip()
         section_map[section].append(item["content"])
-    print("✅ 섹션 맵 생성 완료 section_map:", section_map)
+    print("✅ 섹션 맵 생성 완료 section_map:")
     return {**state, "section_map": dict(section_map)}
 
 
@@ -248,15 +273,15 @@ def match_and_feedback(state: GraphState) -> GraphState:
     resume_text = "\n\n".join(resume_contents)
 
     # 벡터스토어에서 뉴스 주요 내용 추출
-    news_contents = []
-    if state.get("news_vectorstore"):
-        docs = state["news_vectorstore"].similarity_search(
-            state["user_question"],
-            k=7
-        )
-        news_contents = [doc.page_content for doc in docs]
+    # news_contents = []
+    # if state.get("news_vectorstore"):
+    #     docs = state["news_vectorstore"].similarity_search(
+    #         state["user_question"],
+    #         k=3
+    #     )
+    #     news_contents = [doc.page_content for doc in docs]
 
-    news_texts = "\n\n".join(news_contents)
+    # news_texts = "\n\n".join(news_contents)
 
     prompt = f"""
     당신은 사용자의 질문, 관련 뉴스 기사, 첨부된 파일 내용을 모두 통합하여 피드백을 작성하는 전문 분석가입니다.
@@ -265,7 +290,7 @@ def match_and_feedback(state: GraphState) -> GraphState:
     \"\"\"{state['user_question']}\"\"\"
 
     다음은 해당 기업의 최근 뉴스 기사 요약입니다:
-    \"\"\"{news_texts}\"\"\"
+    \"\"\"{state["company_analysis"]}\"\"\"
 
     다음은 첨부된 이력서 또는 포트폴리오의 주요 내용 요약입니다:
     \"\"\"{resume_text}\"\"\"
@@ -279,7 +304,6 @@ def match_and_feedback(state: GraphState) -> GraphState:
     """
 
     print("피드백 생성 중...")
-    print(f"news_texts: {news_texts}")
 
     raw_feedback = feedback_chain.invoke({"query": prompt})
     feedback = clean_llm_output(raw_feedback["result"])
@@ -335,7 +359,7 @@ def run_langgraph_flow(user_question: str,
     # 노드 등록
     # graph.add_node("router", route_by_input_type)
     graph.add_node("router", router_node)
-    graph.add_node("LoadPDF", load_resume_pdf)
+    graph.add_node("LoadFile", load_resume_file)
     graph.add_node("ClassifyPages", classify_by_page)
     graph.add_node("ToSectionMap", make_section_map)
     graph.add_node("VectorIndexing", vector_indexing)
@@ -347,12 +371,12 @@ def run_langgraph_flow(user_question: str,
 
     # 라우팅 조건 설정: qa or feedback
     graph.add_conditional_edges("router", route_by_input_type, {
-        "feedback": "LoadPDF",
+        "feedback": "LoadFile",
         "qa": "AnswerQuestion"
     })
 
     # 피드백 플로우 연결
-    graph.add_edge("LoadPDF", "ClassifyPages")
+    graph.add_edge("LoadFile", "ClassifyPages")
     graph.add_edge("ClassifyPages", "ToSectionMap")
     graph.add_edge("ToSectionMap", "VectorIndexing")
     graph.add_edge("VectorIndexing", "LoadCompanyInfo")
