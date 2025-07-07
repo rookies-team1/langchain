@@ -17,16 +17,14 @@ pypdf = ">=5.7.0,<6.0.0"
 "sentence-transformers" = ">=5.0.0,<6.0.0"
 uvicorn = ">=0.20.0,<0.21.0"
 python-dotenv = ">=1.0.0,<2.0.0"
-<<<<<<< HEAD
 langchain-google-genai = "^2.1.6"
 langchain-community = "^0.3.27"
+langchain-ollama = "^0.3.3"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
-=======
 langchain-groq = "^0.3.5"
 langchain-ollama = "^0.3.3"
->>>>>>> feature/langgraph_feedback
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
