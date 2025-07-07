@@ -12,7 +12,6 @@ from collections import defaultdict
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-# from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -21,78 +20,95 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import LLMChain, RetrievalQA
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_ollama import OllamaLLM
 from langchain_ollama import OllamaEmbeddings
 import json
 from langchain_community.vectorstores import Chroma
 from chromadb import chromadb
-
 import re
+
+# ==============================================================================
+# 1. 초기화 및 설정
+# ==============================================================================
 
 llm = None
 embeddings = None
+chroma_client = None
+
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# HTTP 클라이언트를 사용하여 Docker 컨테이너로 실행 중인 ChromaDB에 접속
-# 'chromadb'는 docker-compose.yml에 정의된 서비스 이름
-# chroma_client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT) 
-
-# --- 설정 및 초기화 ---
-def initialize_models_and_retriever():
-    load_dotenv()
-    
-    llm = ChatOpenAI(
-        api_key=OPENAI_API_KEY,
-        base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
-        temperature=0.7
-    )
-    
-    try:
-        embeddings = OllamaEmbeddings(
-            model="bge-m3:latest", 
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+def get_llm():
+    """LLM 인스턴스를 가져옵니다. 없으면 생성합니다."""
+    global llm
+    if llm is None:
+        load_dotenv()
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-pro",
+            temperature=0.7,
+            max_tokens=None,
+            timeout=None,
+            max_retries=2,
         )
-        # Chroma 벡터 스토어 등록하기
-        
-        # vectorstore = Chroma(
-        #     client=chroma_client,
-        #     collection_name="news_collection", # 사용할 컬렉션 이름 지정
-        #     embedding_function=embeddings,
-        # )
-        return llm, embeddings, None
-    except Exception as e:
-        print(f"임베딩 모델 로드 실패: {e}")
-        embeddings = None
-    
-    return llm, None, None
+    return llm
 
-llm, retriever, news_article = initialize_models_and_retriever()
+def get_embeddings():
+    """임베딩 모델 인스턴스를 가져옵니다. 없으면 생성합니다."""
+    global embeddings
+    if embeddings is None:
+        load_dotenv()
+        try:
+            # ChromaDB와 같은 영구적인 저장소를 사용할 것이므로, 일관된 임베딩 모델 사용이 중요
+            embeddings = OllamaEmbeddings(
+                model="bge-m3:latest", 
+                base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            )
+        except Exception as e:
+            print(f"임베딩 모델 로드 실패: {e}")
+            raise
+    return embeddings
 
+
+def get_chroma_client():
+    """ChromaDB 클라이언트 인스턴스를 가져옵니다. 없으면 생성합니다."""
+    global chroma_client
+    if chroma_client is None:
+        load_dotenv()
+        # 환경 변수 또는 기본값으로 ChromaDB에 연결
+        CHROMA_HOST = os.getenv("VECTOR_DB_HOST", "localhost")
+        CHROMA_PORT = int(os.getenv("VECTOR_DB_PORT", "8001")) # ChromaDB 기본 포트는 8000이나, docker-compose 예시에서 8001로 설정
+        chroma_client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+    return chroma_client
+
+# ==============================================================================
+# 2. Graph State 정의
+# ==============================================================================
 
 class GraphState(TypedDict):
-    user_question: Optional[str] # 사용자 질문
-    company: Optional[str]    # 회사 이름
-    chat_history: List[BaseMessage] # 대화 기록
-    file_path: Optional[str] # 첨부파일 경로
-    pages: Optional[List] # 첨부파일 페이지 리스트
-    classified: Optional[List] # 페이지 분류 결과
-    section_map: Optional[Dict] # 섹션별 내용 맵핑
-    news_vectorstore: Optional[Any] # 뉴스 전문 벡터 스토어 (FAISS)
-    resume_vectorstore: Optional[Any] # 첨부파일 벡터 스토어 (FAISS)
-    company_analysis: Optional[str] # 기업 분석 내용
-    news_summary: Optional[str] # 뉴스 요약 내용
-    feedback: Optional[str] # 피드백 내용
-    answer: Optional[str] # 질문에 대한 답변 내용
+    # 입력 값
+    user_question: str
+    news_id: int  # 뉴스 식별자
+    file_path: Optional[str]
+    chat_history: List[BaseMessage]
+
+    # 그래프 내부에서 관리되는 값
+    input_type: str  # 'qa' or 'feedback'
+    question: str  # 재구성된 질문
     
-    input_type: str # 뉴스 Q&A or 문서 피드백 
-    question: str   # 정제된 질문
-    uploaded_document: str  # 업로드된 문서 (string or 경로)
-    relevant_chunks: List[str]  # 현재 검색기가 바라보고 있는 내용
-    is_grounded: bool   # 답변 평가
-    news_article: str   # 뉴스 기사 원문
-    
+    # QA 경로 관련 상태
+    retriever: Optional[Any] # Retriever 객체 저장 (수정: 상태에 retriever 추가)
+    relevant_chunks: List[str]
+    answer: str
+    is_grounded: bool
+
+    # Feedback 경로 관련 상태
+    pages: Optional[List]
+    section_map: Optional[Dict]
+    feedback: Optional[str]
+
+# ==============================================================================
+# 3. LangGraph 노드 함수 정의
+# ==============================================================================
+
 def clean_llm_output(text: str) -> str:
     # LLM의 출력물에서 필요 없는 태그/마크다운/불필요한 줄바꿈 정리
 
@@ -110,395 +126,257 @@ def clean_llm_output(text: str) -> str:
     # 혹은 ``` ... ``` 전체 제거
     text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
     # 필요 없는 선두/후미 공백 제거
-    return text.strip()    
+    return text.strip()
 
-# --- 라우팅 프롬프트 설정 ---
-route_prompt = ChatPromptTemplate.from_template("""
-    다음은 사용자의 입력입니다:
 
-    "{question}"
-
-    이 입력은 어떤 작업을 요청하고 있나요?
-
-    - 일반 정보 질문이면 "qa"
-    - 첨부 문서를 기반으로 피드백 요청이면 "feedback"
-
-    반드시 위 단어 qa와 feedback 중 하나만 출력하세요.
-    절대 다른 단어를 포함하지 마세요.
-""")
-
-# LLMChain으로 라우팅 체인 생성
-route_chain = route_prompt | llm
-
-split_prompt = ChatPromptTemplate.from_template("""
-    아래는 사용자의 이력서 혹은 포트폴리오의 일부 텍스트입니다.
-
-    =======================
-    {page_text}
-    =======================
-
-    이 텍스트를 아래 항목 중 해당하는 항목에 대응되도록 **원문 내용을 그대로** 추출해 주세요:
-    만약 아래 항목 중 어떤 항목에도 딱 맞지 않더라도, **텍스트를 절대 버리지 말고** 적절한 항목 이름을 새로 설정하여 반드시 포함허거나 기타 항목으로 대응시켜 주세요.
+# --- 라우팅 노드 ---
+def route_request_node(state: GraphState) -> dict:
+    """사용자 질문을 분석하여 다음 단계를 결정하는 라우터"""
+    print("--- 1. 요청 라우팅 ---")
+    llm = get_llm()
+    route_prompt = ChatPromptTemplate.from_template(
+        """사용자 질문 '{question}'은 다음 중 어떤 유형에 가장 가깝습니까?
+        - 뉴스 기사에 대한 질문: 'qa'
+        - 첨부된 문서(이력서/포트폴리오)에 대한 피드백 요청: 'feedback'
+        답변은 반드시 'qa' 또는 'feedback' 단어 하나만 포함해야 합니다."""
+    )
+    routing_chain = route_prompt | llm | StrOutputParser()
+    result = routing_chain.invoke({"question": state["user_question"]})
     
-    - 인적사항
-    - 학력
-    - 경력
-    - 자기소개
-    - 프로젝트
-    - 대외활동
-    - 기술 스택
-    - 수상 및 자격증
-    - 기타
+    cleaned_result = clean_llm_output(result).lower()
+    print(f"✅ LLM 분기 판단 결과: {cleaned_result}")
 
-    아래와 같은 JSON 배열 형식으로만 출력하세요:
-
-    [
-        {{
-            "category": "학력",
-            "content": "한밭대학교 전자전기공학과 ..."
-        }},
-        {{
-            "category": "경력",
-            "content": "한화시스템 센터 하계 인턴십 ..."
-        }}
-    ]
-
-    **규칙:**
-    - 반드시 JSON 배열만 출력하고 다른 설명은 절대 출력하지 마세요.
-    - 그러나 입력된 텍스트 중 어느 항목에도 해당하지 않는 부분이 있다면 적절한 새로운 항목으로 분류하여 반드시 출력해 주세요. 
-""")
-
-
-# LLMChain으로 페이지 분류 체인 생성
-chain_split = split_prompt | llm
-
-# --- 1. 라우팅 노드 ---
-def router_node(state: GraphState) -> GraphState:
-    # Entry point 역할, 상태 그대로 전달만 하면 됨
-    return state
-
-def route_by_input_type(state: GraphState) -> GraphState:
-    raw_result = route_chain.invoke({"question": state["user_question"]})
-    result = clean_llm_output(raw_result).strip().lower()
-    print(f"✅ LLM 분기 판단 결과 : {result}")
-
-    if "feedback" in result:
-        state["input_type"] = "feedback"
-        return state
-    elif "qa" in result:
-        state["input_type"] = "qa"
-        return state
+    if "feedback" in cleaned_result:
+        return {"input_type": "feedback"}
+    elif "qa" in cleaned_result:
+        return {"input_type": "qa"}
     else:
-        raise ValueError(f"지원되지 않는 응답: {result}")
-
-# --- 2. 뉴스 Q&A ---
-def retrieve_chunks_node(state: GraphState):
-    print("--- 2a. 관련 뉴스 기사 검색 ---")
-    news_article = state['news_article']
+        # 기본값으로 QA 설정 또는 에러 처리
+        print("⚠️ 라우팅 실패, 기본값 'qa'로 설정")
+        return {"input_type": "qa"}
     
-    # 뉴스 기사 내용을 기반으로 동적으로 FAISS 벡터스토어 생성
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=20)
-    docs = text_splitter.create_documents([news_article])
     
-    # TODO : Chroma 벡터 스토어로 변경
-    if embeddings:
-        vectorstore = FAISS.from_documents(docs, embeddings)
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-        state['retriever'] = retriever
-    else:
-        print(" > 임베딩 모델이 초기화되지 않아 검색기를 생성할 수 없습니다.")
-        state['relevant_chunks'] = [news_article] # 전체 기사를 컨텍스트로 사용
-        return state
-
-    question = state['question']
+# --- 뉴스 Q&A 경로 ---
+def retrieve_from_chroma_node(state: GraphState):
+    """(성능 개선) ChromaDB에서 news_id를 필터링하여 관련 청크를 검색"""
+    print(f"--- 2a. ChromaDB에서 뉴스 검색 (news_id: {state['news_id']}) ---")
+    embeddings = get_embeddings()
+    chroma_client = get_chroma_client()
+    
+    vectorstore = Chroma(
+        client=chroma_client,
+        collection_name="news_collection", # 사전에 뉴스가 저장된 컬렉션
+        embedding_function=embeddings,
+    )
+    
+    # news_id를 메타데이터 필터로 사용하여 해당 뉴스 기사 내에서만 검색
+    retriever = vectorstore.as_retriever(
+        search_kwargs={'filter': {'news_id': state['news_id']}, "k": 3}
+    )
+    
+    # 재구성된 질문 또는 원본 질문을 사용 (이 예제에서는 원본 사용)
+    question = state['user_question']
     documents = retriever.invoke(question)
-    state['relevant_chunks'] = [doc.page_content for doc in documents]
-    print(f" > ‘{question[:20]}...’에 대해 {len(documents)}개의 관련 문서를 찾았습니다.")
+    
+    if not documents:
+        print(f"⚠️ news_id '{state['news_id']}'에 해당하는 문서를 ChromaDB에서 찾을 수 없습니다.")
+        # fallback: state에 news_content가 있다면 그것을 사용 (API 설계에 따라)
+        # 이 예제에서는 빈 리스트로 처리
+        state['relevant_chunks'] = []
+    else:
+        state['relevant_chunks'] = [doc.page_content for doc in documents]
+        print(f"✅ ‘{question[:20]}...’에 대해 {len(documents)}개의 관련 문서를 찾았습니다.")
     return state
-
+  
+  
 def generate_answer_node(state: GraphState):
-    print("--- 3a. 답변 생성 (대화 맥락 반영) ---")
+    print("--- 3a. 답변 생성 ---")
+    llm = get_llm()
     prompt = ChatPromptTemplate.from_template(
-        """당신은 뉴스 기사 분석가입니다.
-        [이전 대화 내용]과 [뉴스 기사 내용]을 바탕으로 [질문]에 대해 한국어로 명확하고 간결하게 답변하세요.
-        내용을 찾을 수 없으면 ‘정보를 찾을 수 없습니다’라고 답변하세요.
-
-        [이전 대화 내용]:
-        {chat_history}
-
-        [뉴스 기사 내용]:
-        {context}
-
-        [질문]:
-        {question}
-        """
+        """[뉴스 기사 내용]을 바탕으로 [질문]에 대해 한국어로 명확하고 간결하게 답변하세요.
+        [뉴스 기사 내용]: {context}
+        [질문]: {question}"""
     )
     rag_chain = prompt | llm | StrOutputParser()
-    answer = rag_chain.invoke({
-        "chat_history": "\n".join([f"{msg.type}: {msg.content}" for msg in state['chat_history']]),
-        "context": "\n---\n".join(state['relevant_chunks']),
-        "question": state['question']
-    })
-    state['answer'] = answer
-    # print(f" > 생성된 답변: {answer[:30]}...")
+    
+    if not state['relevant_chunks']:
+        answer = "관련 정보를 찾을 수 없습니다. 뉴스 ID를 확인해주세요."
+    else:
+        answer = rag_chain.invoke({
+            "context": "\n---\n".join(state['relevant_chunks']),
+            "question": state['user_question']
+        })
+    state['answer'] = clean_llm_output(answer)
     return state
 
 def grade_answer_node(state: GraphState):
     print("--- 4a. 답변 검증 ---")
+    llm = get_llm()
     prompt = ChatPromptTemplate.from_template(
-        """당신은 답변 평가 전문가입니다. 
-        주어진 [뉴스 기사 내용]을 볼 때, [생성된 답변]이 [질문]에 대해 사실에 근거하여 올바르게 답변되었는지 평가해주세요. 
-        답변이 내용에 근거했다면 ‘yes’, 그렇지 않다면 ‘no’라고만 답해주세요.
-
-        [뉴스 기사 내용]:
-        {context}
-
-        [질문]:
-        {question}
-
-        [생성된 답변]:
-        {answer}
-        """
+        """[뉴스 기사 내용]을 볼 때, [생성된 답변]이 [질문]에 대해 사실에 근거하는지 평가해주세요.
+        근거했다면 'yes', 아니면 'no'라고만 답해주세요.
+        [뉴스 기사 내용]: {context}
+        [질문]: {question}
+        [생성된 답변]: {answer}"""
     )
     grading_chain = prompt | llm | StrOutputParser()
     grade = grading_chain.invoke({
         "context": "\n---\n".join(state['relevant_chunks']),
-        "question": state['question'],
+        "question": state['user_question'],
         "answer": state['answer']
     })
     
     if "yes" in grade.lower():
         state['is_grounded'] = True
-        # print(" > 검증 결과: 통과 (내용에 근거함)")
+        print("✅ 검증 결과: 통과")
     else:
         state['is_grounded'] = False
-        # print(" > 검증 결과: 실패 (내용에 근거하지 않음)")
+        print("❌ 검증 결과: 실패")
     return state
 
 
-# --- 3. 문서 피드백 ---
-def load_resume_file(state: GraphState) -> GraphState:
+# --- 문서 피드백 경로 (개념 증명용으로 단순화) ---
+def load_and_summarize_resume_node(state: GraphState):
+    print("--- 2b. 이력서 로드 및 요약 ---")
     file_path = state["file_path"]
-    pages = []
+    if not file_path or not os.path.exists(file_path):
+        raise ValueError("피드백을 위한 파일 경로가 유효하지 않습니다.")
 
     if file_path.lower().endswith(".pdf"):
         loader = PyPDFLoader(file_path)
-        pages = loader.load()
-        print(f"✅ PDF {len(pages)} 페이지 로드 완료")
-    elif file_path.lower().endswith(".txt"):
-        with open(file_path, "r", encoding="utf-8") as f:
-            text = f.read()
-        # 텍스트 파일은 2000자 단위로 페이지로 나누어 처리 (필요 시 조정)
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=2000,
-            chunk_overlap=100
-        )
-        pages = text_splitter.create_documents([text])
-        print(f"✅ TXT {len(pages)} 페이지(청크) 로드 완료")
-    else:
-        raise ValueError("지원하지 않는 파일 형식입니다. pdf 또는 txt만 지원합니다.")
+        pages = loader.load_and_split()
+    else: # txt
+        loader = TextLoader(file_path, encoding='utf-8')
+        pages = loader.load_and_split()
+    
+    full_text = " ".join([page.page_content for page in pages])
 
-    return {**state, "pages": pages}
-
-
-def classify_by_page(state: GraphState) -> GraphState:
-    results = []
-    for idx, page in enumerate(state["pages"]):
-        paragraphs = [p.strip() for p in re.split(r"\n{2,}", page.page_content.strip()) if p.strip()]  # \n 2개 이상으로 분리
-        
-        # 문장 중간 \n 제거
-        for i in range(len(paragraphs)):
-            paragraphs[i] = re.sub(r'(?<![.!?])\n(?!\n)', ' ', paragraphs[i])
-        
-        for p_idx, paragraph in enumerate(paragraphs):
-            raw_res = chain_split.invoke({"page_text": paragraph})
-
-            try:
-                raw_text = raw_res["text"] if isinstance(raw_res, dict) and "text" in raw_res else raw_res
-                parsed_res = json.loads(raw_text)
-                for item in parsed_res:
-                    category = item.get("category", "").strip()
-                    content = item.get("content", "").strip()
-                    if not category:
-                        category = "Uncategorized"  # 적절한 기본 카테고리명으로 변경 가능
-                    results.append({
-                        "page": idx + 1,
-                        "category": category,
-                        "content": content
-                    })
-            except Exception as e:
-                print(f"⚠️ JSON 파싱 실패: {e}")
-                results.append({
-                    "page": idx + 1,
-                    "category": "Unknown",
-                    "content": paragraph
-                })
-
-    # 분류 결과 출력
-    output_path = "./file_data/classified_pages.json"
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
-    print(f"✅ 분류 결과가 '{output_path}' 파일로 저장되었습니다.")
-
-    return {**state, "classified": results}
-
-def make_section_map(state: GraphState) -> GraphState:
-    # 분류된 페이지 내용을 같은 항목별로 묶음
-    section_map = defaultdict(list)
-    for item in state["classified"]:
-        section = item["category"].split(":")[0].strip()
-        section_map[section].append(item["content"])
-    print("✅ 섹션 맵 생성 완료 section_map:")
-    return {**state, "section_map": dict(section_map)}
-
-def vector_indexing(state: GraphState) -> GraphState:
-    # HuggingFace 임베딩 + FAISS를 사용해 벡터스토어 생성
-    embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
-    texts, metadatas = [], []
-    for section, contents in state["section_map"].items():
-        for content in contents:
-            texts.append(content)
-            metadatas.append({"section": section})
-    resume_vectorstore = FAISS.from_texts(texts, embeddings, metadatas)
-    return {**state, "resume_vectorstore": resume_vectorstore}
-
-
-def load_company_analysis(state: GraphState) -> GraphState:
-    # 회사 분석 요약 로드 (이 단계에서 추가 작업은 없지만 구조상 필요)
+    # (비용/시간 개선) 전체 텍스트를 한번에 요약하도록 변경
+    llm = get_llm()
+    prompt = ChatPromptTemplate.from_template("다음 이력서/포트폴리오의 핵심 역량과 프로젝트 경험을 3~5 문장으로 요약해줘.\n\n{text}")
+    summarization_chain = prompt | llm | StrOutputParser()
+    summary = summarization_chain.invoke({"text": full_text})
+    
+    state['answer'] = f"이력서 요약:\n{clean_llm_output(summary)}\n\n(상세 피드백 기능은 개발 중입니다.)"
+    print("✅ 이력서 요약 완료")
     return state
 
-def match_and_feedback(state: GraphState) -> GraphState:
-    # 뉴스 요약 + 첨부파일 내용 + 질문 기반으로 LLM이 피드백 생성
+# ==============================================================================
+# 4. 그래프 구성 및 실행 함수
+# ==============================================================================
 
-    retriever_resume = state["resume_vectorstore"].as_retriever()
-    feedback_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever_resume)
-
-    # 벡터스토어에서 이력서/포트폴리오 주요 내용 추출
-    resume_contents = []
-    if state.get("resume_vectorstore"):
-        docs = state["resume_vectorstore"].similarity_search(
-            state["user_question"],
-            k=7
-        )
-        resume_contents = [doc.page_content for doc in docs]
-
-    resume_text = "\n\n".join(resume_contents)
-
-    # 벡터스토어에서 뉴스 주요 내용 추출
-    # news_contents = []
-    # if state.get("news_vectorstore"):
-    #     docs = state["news_vectorstore"].similarity_search(
-    #         state["user_question"],
-    #         k=3
-    #     )
-    #     news_contents = [doc.page_content for doc in docs]
-
-    # news_texts = "\n\n".join(news_contents)
-
-    prompt = f"""
-    당신은 사용자의 질문, 관련 뉴스 기사, 첨부된 파일 내용을 모두 통합하여 피드백을 작성하는 전문 분석가입니다.
-
-    다음은 사용자 질문입니다:
-    \"\"\"{state['user_question']}\"\"\"
-
-    다음은 해당 기업의 최근 뉴스 기사 요약입니다:
-    \"\"\"{state["company_analysis"]}\"\"\"
-
-    다음은 첨부된 이력서 또는 포트폴리오의 주요 내용 요약입니다:
-    \"\"\"{resume_text}\"\"\"
-
-    위의 모든 정보를 바탕으로 다음 사항을 충실히 반영해 작성해 주세요:
-    1. **질문에 대한 정확한 답변**과 함께 맥락을 구체적으로 설명할 것.
-    2. 뉴스 기사 분석 내용을 반영해 사용자 질문과 연관된 인사이트가 있으면 언급할 것.
-    3. 첨부 파일 내용(이력서/포트폴리오) 기반으로 강점, 보완할 점, 개선 방향을 항목별로 구체적으로 작성할 것.
-    4. 각 항목별로 '강점', '부족한 점', '보완 방안'으로 나누어 깔끔하게 정리할 것.
-    5. 구체적이며 명확하고, 실제 면접 또는 준비에 실질적으로 도움이 되는 형태로 작성할 것.
-    """
-
-    print("피드백 생성 중...")
-
-    raw_feedback = feedback_chain.invoke({"query": prompt})
-    feedback = clean_llm_output(raw_feedback["result"])
-    print("✅ 피드백 생성 완료")
-    return {**state, "feedback": feedback}
-
-
-def run_workflow(
-                user_question: str,
-                resume_path: Optional[str] = None,
-                news_content: Optional[str] = None,
-                news_summary_path: Optional[str] = None,
-                chat_history: Optional[List[BaseMessage]] = None ):
-    
-    # LangGraph 객체 생성
+def create_workflow():
+    """LangGraph 워크플로우를 생성하고 컴파일합니다."""
     graph = StateGraph(GraphState)
-    
+
     # 노드 등록
-    # 시작점 (라우터)
-    graph.add_node("router", router_node)
-    graph.set_entry_point("router")
-    
-    # Q&A 관련 노드
-    graph.add_node("retrieve_chunks", retrieve_chunks_node)
+    graph.add_node("route_request", route_request_node)
+    graph.add_node("retrieve_from_chroma", retrieve_from_chroma_node)
     graph.add_node("generate_answer", generate_answer_node)
     graph.add_node("grade_answer", grade_answer_node)
-    
-    # 문서 피드백 관련 노드
-    graph.add_node("LoadFile", load_resume_file)
-    graph.add_node("ClassifyPages", classify_by_page)
-    graph.add_node("ToSectionMap", make_section_map)
-    graph.add_node("VectorIndexing", vector_indexing)
-    graph.add_node("LoadCompanyInfo", load_company_analysis)
-    graph.add_node("Feedback", match_and_feedback)
-    
-    # 라우팅 조건 설정: qa or feedback
+    graph.add_node("load_and_summarize_resume", load_and_summarize_resume_node)
+
+    # 그래프 흐름 정의
+    graph.set_entry_point("route_request")
+
+    # 라우팅 조건 설정
     graph.add_conditional_edges(
-        "router",
+        "route_request",
         lambda state: state["input_type"],
         {
-            "feedback": "LoadFile",
-            "qa": "retrieve_chunks"
+            "qa": "retrieve_from_chroma",
+            "feedback": "load_and_summarize_resume",
         }
     )
-    
-    # Q&A 관련 노드들 연결하기
-    graph.add_edge("retrieve_chunks", "generate_answer")
+
+    # Q&A 경로
+    graph.add_edge("retrieve_from_chroma", "generate_answer")
     graph.add_edge("generate_answer", "grade_answer")
     graph.add_conditional_edges(
         "grade_answer",
-        lambda state: "grounded" if state["is_grounded"] else "not_grounded",
+        lambda state: "grounded" if state.get("is_grounded", False) else "not_grounded",
         {
             "grounded": END,
-            "not_grounded": END, 
+            "not_grounded": "generate_answer"  # (수정) 실패 시 답변 재생성 (Self-Correction)
         }
     )
-    
-    # 문서 피드백 관련 노드들 연결하기
-    graph.add_edge("LoadFile", "ClassifyPages")
-    graph.add_edge("ClassifyPages", "ToSectionMap")
-    graph.add_edge("ToSectionMap", "VectorIndexing")
-    graph.add_edge("VectorIndexing", "LoadCompanyInfo")
-    graph.add_edge("LoadCompanyInfo", "Feedback")
-    graph.add_edge("Feedback", END)
-    
-    app = graph.compile()
-    return app
+
+    # 피드백 경로
+    graph.add_edge("load_and_summarize_resume", END)
+
+    return graph.compile()
+
+# 워크플로우 앱을 한번만 생성
+agent_app = create_workflow()
     
     
+# ==============================================================================
+# 5. 테스트 실행 블록
+# ==============================================================================
+
 if __name__ == "__main__":
-    app = run_workflow(
-        user_question="",
-        resume_path="./file_data/이력서_이준기.pdf",
-        news_content=None,
-        news_summary_path="./news_data/news_sample1_summary.json",
-        chat_history=None
-    )
+    # 이 블록은 직접 실행하여 테스트할 때 사용됩니다.
+    # FastAPI 서버에서는 이 블록이 실행되지 않습니다.
+
+    # --- 시나리오 1: 뉴스 Q&A 테스트 ---
+    print("\n" + "="*50)
+    print("시나리오 1: 뉴스 Q&A 테스트 시작")
+    print("="*50)
     
-     # 그래프 시각화
+    # 가정: news_id=101에 해당하는 뉴스가 이미 ChromaDB에 저장되어 있음
+    # (사전 작업: 별도의 스크립트로 뉴스를 ChromaDB에 저장해야 함)
+    
+    qa_input = {
+        "user_question": "SK쉴더스가 제로트러스트 모델로 뭘 하려는 건가요?",
+        "news_id": 101, # Spring 서버로부터 받은 뉴스 ID
+        "file_path": None,
+        "chat_history": []
+    }
+    
     try:
-        graph_image_path = "langgraph_structure_new.png"
+        # stream()을 사용하면 각 단계의 출력을 볼 수 있음
+        for output in agent_app.stream(qa_input, {"recursion_limit": 5}):
+            node_name = list(output.keys())[0]
+            node_output = output[node_name]
+            print(f"--- 노드 '{node_name}' 실행 완료 ---")
+            # print(f"상태: {node_output}\n")
+        
+        final_state = agent_app.invoke(qa_input)
+        print("\n[최종 답변]:", final_state.get('answer'))
+
+    except Exception as e:
+        print(f"\n[오류 발생]: {e}")
+
+
+    # --- 시나리오 2: 이력서 피드백 테스트 ---
+    print("\n" + "="*50)
+    print("시나리오 2: 이력서 피드백 테스트 시작")
+    print("="*50)
+    
+    # 테스트용 이력서 파일 생성
+    resume_file = "test_resume.txt"
+    with open(resume_file, "w", encoding="utf-8") as f:
+        f.write("이준기\nPython, Java 개발 경험. LangChain 프로젝트 수행.")
+    
+    feedback_input = {
+        "user_question": "제 이력서에 대해 피드백 해주세요.",
+        "news_id": None,
+        "file_path": resume_file,
+        "chat_history": []
+    }
+
+    try:
+        final_state = agent_app.invoke(feedback_input)
+        print("\n[최종 답변]:", final_state.get('answer'))
+    except Exception as e:
+        print(f"\n[오류 발생]: {e}")
+        
+    # 그래프 시각화
+    try:
+        graph_image_path = "agent_workflow.png"
         with open(graph_image_path, "wb") as f:
-            f.write(app.get_graph().draw_mermaid_png())
-        print(f"LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
+            f.write(agent_app.get_graph().draw_mermaid_png())
+        print(f"\n✅ LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
     except Exception as e:
         print(f"그래프 시각화 중 오류 발생: {e}")
+        
