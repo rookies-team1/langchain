@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from summarizer import summarize_news
 from chatbot_re import run_langgraph_flow
 from langGraph_p1 import run_chat_graph
+from chat_langgraph import main
 from typing import List, TypedDict, Optional
 import os
 
@@ -70,16 +71,16 @@ async def summarize(news: News):
 class ChatbotRequest(BaseModel):
     user_question: str
     resume_path: str = None  # optional
-    news_full_path: str = None
+    news_content: str = None
     news_summary_path: str
 
 @app.post("/chatbot")
 def chatbot_router(request: ChatbotRequest):
     try:
-        result = run_langgraph_flow(
+        result = main(
             user_question=request.user_question,
             resume_path=request.resume_path,
-            news_full_path=request.news_full_path,
+            news_content=request.news_content,
             news_summary_path=request.news_summary_path
         )
         return {

@@ -1,6 +1,8 @@
 import os
 import sys
 
+from langchain_openai import ChatOpenAI
+
 # llm-service 디렉토리를 sys.path에 추가
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
@@ -10,7 +12,7 @@ from collections import defaultdict
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import OllamaEmbeddings
+# from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -20,14 +22,17 @@ from langchain.chains import LLMChain, RetrievalQA
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_ollama import OllamaLLM
+from langchain_ollama import OllamaEmbeddings
 import json
 from langchain_community.vectorstores import Chroma
-import chromadb
+from chromadb import chromadb
 
 import re
 
 llm = None
 embeddings = None
+load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # HTTP 클라이언트를 사용하여 Docker 컨테이너로 실행 중인 ChromaDB에 접속
 # 'chromadb'는 docker-compose.yml에 정의된 서비스 이름
@@ -37,12 +42,11 @@ embeddings = None
 def initialize_models_and_retriever():
     load_dotenv()
     
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-pro",
-        temperature=0.7,
-        max_tokens=None,
-        timeout=None,
-        max_retries=2,
+    llm = ChatOpenAI(
+        api_key=OPENAI_API_KEY,
+        base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        temperature=0.7
     )
     
     try:
@@ -124,7 +128,7 @@ route_prompt = ChatPromptTemplate.from_template("""
 """)
 
 # LLMChain으로 라우팅 체인 생성
-route_chain = LLMChain(llm=llm, prompt=route_prompt)
+route_chain = route_prompt | llm
 
 split_prompt = ChatPromptTemplate.from_template("""
     아래는 사용자의 이력서 혹은 포트폴리오의 일부 텍스트입니다.
@@ -166,7 +170,7 @@ split_prompt = ChatPromptTemplate.from_template("""
 
 
 # LLMChain으로 페이지 분류 체인 생성
-chain_split = LLMChain(llm=llm, prompt=split_prompt)
+chain_split = split_prompt | llm
 
 # --- 1. 라우팅 노드 ---
 def router_node(state: GraphState) -> GraphState:
@@ -174,7 +178,7 @@ def router_node(state: GraphState) -> GraphState:
     return state
 
 def route_by_input_type(state: GraphState) -> GraphState:
-    raw_result = route_chain.run(question=state["user_question"])
+    raw_result = route_chain.invoke({"question": state["user_question"]})
     result = clean_llm_output(raw_result).strip().lower()
     print(f"✅ LLM 분기 판단 결과 : {result}")
 
@@ -453,7 +457,7 @@ def run_workflow(
         lambda state: state["input_type"],
         {
             "feedback": "LoadFile",
-            "qa": "AnswerQuestion"
+            "qa": "retrieve_chunks"
         }
     )
     
