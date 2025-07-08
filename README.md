@@ -1,6 +1,5 @@
-# llm-svc (dev branch)
+# llm-svc
 
-### 여기는 dev 브랜치입니다.
 
 # 기능 개발
 
