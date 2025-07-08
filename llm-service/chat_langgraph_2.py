@@ -23,8 +23,8 @@ from langchain.chains import LLMChain, RetrievalQA
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_ollama import OllamaEmbeddings
+from langchain_chroma import Chroma
 import json
-from langchain_community.vectorstores import Chroma
 from chromadb import chromadb
 import re
 
@@ -35,6 +35,8 @@ import re
 llm = None
 embeddings = None
 chroma_client = None
+
+collection_name = "news_vector_db"
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -51,6 +53,12 @@ def get_llm():
             timeout=None,
             max_retries=2,
         )
+        # llm = ChatOpenAI(
+        #     api_key=OPENAI_API_KEY,
+        #     base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
+        #     model="meta-llama/llama-4-scout-17b-16e-instruct",
+        #     temperature=0.7
+        # )
     return llm
 
 def get_embeddings():
@@ -61,8 +69,8 @@ def get_embeddings():
         try:
             # ChromaDB와 같은 영구적인 저장소를 사용할 것이므로, 일관된 임베딩 모델 사용이 중요
             embeddings = OllamaEmbeddings(
-                model="bge-m3:567m", 
-                base_url=os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+                model="bge-m3:latest", 
+                base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
             )
         except Exception as e:
             print(f"임베딩 모델 로드 실패: {e}")
@@ -76,7 +84,7 @@ def get_chroma_client():
     if chroma_client is None:
         load_dotenv()
         # 환경 변수 또는 기본값으로 ChromaDB에 연결
-        CHROMA_HOST = os.getenv("VECTOR_DB_HOST", "localhost")
+        CHROMA_HOST = os.getenv("VECTOR_DB_HOST", "chroma")
         CHROMA_PORT = int(os.getenv("VECTOR_DB_PORT", "8001")) # ChromaDB 기본 포트는 8000이나, docker-compose 예시에서 8001로 설정
         chroma_client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
     return chroma_client
@@ -104,8 +112,8 @@ class GraphState(TypedDict):
 
     # Feedback 경로 관련 상태
     pages: Optional[List]
-    section_map: Optional[Dict]
-    feedback: Optional[str]
+    user_file_summary: Optional[str]
+    feedback: str
 
 # ==============================================================================
 # 3. LangGraph 노드 함수 정의
@@ -140,8 +148,7 @@ def route_request_node(state: GraphState) -> dict:
         """사용자 질문 '{question}'은 다음 중 어떤 유형에 가장 가깝습니까?
         - 뉴스 기사에 대한 질문: 'qa'
         - 첨부된 문서(이력서/포트폴리오)에 대한 피드백 요청: 'feedback'
-        답
-        변은 반드시 'qa' 또는 'feedback' 단어 하나만 포함해야 합니다."""
+        답변은 반드시 'qa' 또는 'feedback' 단어 하나만 포함해야 합니다."""
     )
     routing_chain = route_prompt | llm | StrOutputParser()
     result = routing_chain.invoke({"question": state["user_question"]})
@@ -168,18 +175,23 @@ def retrieve_from_chroma_node(state: GraphState):
     
     vectorstore = Chroma(
         client=chroma_client,
-        collection_name="news_collection", # 사전에 뉴스가 저장된 컬렉션
+        collection_name=collection_name, # 사전에 뉴스가 저장된 컬렉션
         embedding_function=embeddings,
     )
     
     # news_id를 메타데이터 필터로 사용하여 해당 뉴스 기사 내에서만 검색
     retriever = vectorstore.as_retriever(
-        search_kwargs={'filter': {'news_id': state['news_id']}, "k": 3}
+        search_kwargs={'filter': {'news_id': str(state['news_id'])}, "k": 3}
     )
     
     # 재구성된 질문 또는 원본 질문을 사용 (이 예제에서는 원본 사용)
     question = state['user_question']
-    documents = retriever.invoke(question)
+    # documents = retriever.invoke(question)
+    try:
+        documents = retriever.get_relevant_documents(question)
+    except AttributeError:
+        # fallback for retriever implementations that use 'invoke'
+        documents = retriever.invoke(question)
     
     if not documents:
         print(f"⚠️ news_id '{state['news_id']}'에 해당하는 문서를 ChromaDB에서 찾을 수 없습니다.")
@@ -261,9 +273,58 @@ def load_and_summarize_resume_node(state: GraphState):
     summarization_chain = prompt | llm | StrOutputParser()
     summary = summarization_chain.invoke({"text": full_text})
     
-    state['answer'] = f"이력서 요약:\n{clean_llm_output(summary)}\n\n 상세 피드백 기능 추가 예정"
+    state['user_file_summary'] = f"{clean_llm_output(summary)}"
     print("✅ 이력서 요약 완료")
     return state
+
+def generate_resume_feedback_node(state: GraphState) -> GraphState:
+    """
+    이력서  요약된 내용 + 질문 + 기업 뉴스 요약 기반으로
+    맞춤형 피드백을 생성하여 state["feedback"] 에 저장
+    """
+    print("--- 3b. 맞춤형 이력서 피드백 생성 ---")
+    
+    llm = get_llm()
+
+    # --- 프롬프트 ---
+    prompt_template = ChatPromptTemplate.from_template("""
+        당신은 전문 이력서 및 포트폴리오 피드백 컨설턴트입니다.
+
+        다음은 사용자의 질문입니다:
+        \"\"\"{question}\"\"\"
+
+        
+        다음은 이력서의 항목별 요약 내용입니다:
+        \"\"\"{resume_summary}\"\"\"
+
+        위 정보를 바탕으로 아래 조건에 맞게 한국어로 구체적으로 피드백을 작성해 주세요:
+
+        질문에 대한 명확한 답변 및 관련 맥락 언급
+        뉴스 요약 내용을 반영해 기업 상황과 연계한 인사이트가 있으면 언급
+        구체적이고 실질적으로 면접과 준비에 도움이 되는 형태
+
+        다른 불필요한 설명은 작성하지 말고, 피드백만 출력하세요.
+    """)
+
+    # 다음은 지원하려는 기업의 최근 뉴스 요약입니다:
+    # \"\"\"{context}\"\"\"
+
+    # --- 체인 생성 ---
+    feedback_chain = prompt_template | llm | StrOutputParser()
+
+    feedback = feedback_chain.invoke({
+        # "context": "\n---\n".join(state['relevant_chunks']),
+        "question": state['user_question'],
+        "resume_summary": state['user_file_summary']
+    })
+
+    cleaned_feedback = clean_llm_output(feedback)
+
+    state["feedback"] = cleaned_feedback
+
+    print("✅ 맞춤형 이력서 피드백 생성 완료")
+    return state
+
 
 # ==============================================================================
 # 4. 그래프 구성 및 실행 함수
@@ -279,7 +340,7 @@ def create_workflow():
     graph.add_node("generate_answer", generate_answer_node)
     graph.add_node("grade_answer", grade_answer_node)
     graph.add_node("load_and_summarize_resume", load_and_summarize_resume_node)
-
+    graph.add_node("generate_resume_feedback", generate_resume_feedback_node)
     # 그래프 흐름 정의
     graph.set_entry_point("route_request")
 
@@ -298,18 +359,28 @@ def create_workflow():
     graph.add_edge("generate_answer", "grade_answer")
     graph.add_conditional_edges(
         "grade_answer",
-        lambda state: "grounded" if state.get("is_grounded", False) else "not_grounded",
+        lambda state: "grounded" if state.get("is_grounded", True) else "not_grounded",
         {
             "grounded": END,
-            "not_grounded": "generate_answer"  # (수정) 실패 시 답변 재생성 (Self-Correction)
+            "not_grounded": "generate_answer"  # 실패 시 답변 재생성 (Self-Correction)
         }
     )
 
     # 피드백 경로
-    graph.add_edge("load_and_summarize_resume", END)
+    graph.add_edge("load_and_summarize_resume", "generate_resume_feedback")
+    # graph.add_conditional_edges(
+    #     "generate_resume_feedback",
+    #     lambda state: "feedback_generated" if state.get("feedback") else "feedback_failed", # 피드백이 생성되었는지 확인
+    #     {
+    #         "feedback_generated": END,
+    #         "feedback_failed": "load_and_summarize_resume"  # 실패 시 종료 (추후 개선 가능)
+    #     }
+    # )
+    graph.add_edge("generate_resume_feedback", END)  # 피드백 생성 후 종료
 
+    # 워크플로우를 컴파일하여 반환
     return graph.compile()
-
+    
 # 워크플로우 앱을 한번만 생성
 agent_app = create_workflow()
     
@@ -364,7 +435,7 @@ if __name__ == "__main__":
         f.write("이준기\nPython, Java 개발 경험. LangChain 프로젝트 수행.")
     
     feedback_input = {
-        "user_question": "제 이력서에 대해 피드백 해주세요.",
+        "user_question": "제 이력서에서 자기소개서만 피드백 해주세요.",
         "news_id": None,
         "file_path": resume_file,
         "chat_history": []
@@ -372,16 +443,16 @@ if __name__ == "__main__":
 
     try:
         final_state = agent_app.invoke(feedback_input)
-        print("\n[최종 답변]:", final_state.get('answer'))
+        print("\n[최종 답변]:", final_state.get('feedback'))
     except Exception as e:
         print(f"\n[오류 발생]: {e}")
         
     # 그래프 시각화
-    try:
-        graph_image_path = "agent_workflow.png"
-        with open(graph_image_path, "wb") as f:
-            f.write(agent_app.get_graph().draw_mermaid_png())
-        print(f"\n✅ LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
-    except Exception as e:
-        print(f"그래프 시각화 중 오류 발생: {e}")
+    # try:
+    #     graph_image_path = "agent_workflow.png"
+    #     with open(graph_image_path, "wb") as f:
+    #         f.write(agent_app.get_graph().draw_mermaid_png())
+    #     print(f"\n✅ LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
+    # except Exception as e:
+    #     print(f"그래프 시각화 중 오류 발생: {e}")
         
