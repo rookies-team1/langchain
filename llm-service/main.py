@@ -3,7 +3,6 @@ from pydantic import BaseModel
 
 from . import summarizer
 
-from chat_langgraph_2 import main
 from typing import List, TypedDict, Optional
 import os
 import httpx
