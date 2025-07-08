@@ -1,4 +1,4 @@
-# poetry run python ..
+# poetry run python ./llm-service/chat_langgraph_2.py
 
 import os
 import sys
@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from typing import TypedDict, Optional, List, Dict, Any
 from dotenv import load_dotenv
 from collections import defaultdict
+from langchain_tavily import TavilySearch
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -35,9 +36,11 @@ import re
 llm = None
 embeddings = None
 chroma_client = None
+tavily_tool = TavilySearch(k=3)
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 def get_llm():
     """LLM 인스턴스를 가져옵니다. 없으면 생성합니다."""
@@ -51,12 +54,12 @@ def get_llm():
         #     timeout=None,
         #     max_retries=2,
         # )
-        # llm = ChatOpenAI(
-        #     api_key=OPENAI_API_KEY,
-        #     base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
-        #     model="meta-llama/llama-4-scout-17b-16e-instruct",
-        #     temperature=0.7
-        # )
+        llm = ChatOpenAI(
+            api_key=OPENAI_API_KEY,
+            base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            temperature=0.7
+        )
     return llm
 
 def get_embeddings():
@@ -96,6 +99,7 @@ class GraphState(TypedDict):
     user_question: str
     news_id: int  # 뉴스 식별자
     file_path: Optional[str]
+    company: Optional[str]  # 기업명 (Tavily 검색에 사용)
     chat_history: List[BaseMessage]
 
     # 그래프 내부에서 관리되는 값
@@ -107,6 +111,7 @@ class GraphState(TypedDict):
     relevant_chunks: List[str]
     answer: str
     is_grounded: bool
+    tavily_snippets: Optional[List[str]]  # Tavily 검색 결과 스니펫
 
     # Feedback 경로 관련 상태
     pages: Optional[List]
@@ -137,6 +142,25 @@ def clean_llm_output(text: str) -> str:
     return text.strip()
 
 
+def clean_pdf_text(text: str) -> str:
+    # 1) 여러 줄바꿈을 하나로 줄이기
+    text = re.sub(r'\n+', '\n', text)
+    
+    # 2) 단어 사이 줄바꿈(\n) -> 공백으로 대체 (단, 문장 끝 \n은 살릴 수 있음)
+    # 예: '임베디드\n시스템' → '임베디드 시스템'
+    text = re.sub(r'(?<=\S)\n(?=\S)', ' ', text)
+    
+    # 3) 다중 공백을 한 칸 공백으로 축소
+    text = re.sub(r'[ \t]+', ' ', text)
+    
+    # 4) 문장 부호 뒤에는 줄바꿈 살리고 나머지는 띄어쓰기
+    # (필요 시 커스텀)
+    
+    return text.strip()
+
+
+
+
 # --- 라우팅 노드 ---
 def route_request_node(state: GraphState) -> dict:
     """사용자 질문을 분석하여 다음 단계를 결정하는 라우터"""
@@ -165,58 +189,127 @@ def route_request_node(state: GraphState) -> dict:
     
     
 # --- 뉴스 Q&A 경로 ---
+# def retrieve_from_chroma_node(state: GraphState):
+#     """(성능 개선) ChromaDB에서 news_id를 필터링하여 관련 청크를 검색"""
+#     print(f"--- 2a. ChromaDB에서 뉴스 검색 (news_id: {state['news_id']}) ---")
+#     embeddings = get_embeddings()
+#     chroma_client = get_chroma_client()
+    
+#     vectorstore = Chroma(
+#         client=chroma_client,
+#         collection_name="news_collection", # 사전에 뉴스가 저장된 컬렉션
+#         embedding_function=embeddings,
+#     )
+    
+#     # news_id를 메타데이터 필터로 사용하여 해당 뉴스 기사 내에서만 검색
+#     retriever = vectorstore.as_retriever(
+#         search_kwargs={'filter': {'news_id': state['news_id']}, "k": 3}
+#     )
+    
+#     # 재구성된 질문 또는 원본 질문을 사용 (이 예제에서는 원본 사용)
+#     question = state['user_question']
+#     # documents = retriever.invoke(question)
+#     try:
+#         documents = retriever.get_relevant_documents(question)
+#     except AttributeError:
+#         # fallback for retriever implementations that use 'invoke'
+#         documents = retriever.invoke(question)
+    
+#     if not documents:
+#         print(f"⚠️ news_id '{state['news_id']}'에 해당하는 문서를 ChromaDB에서 찾을 수 없습니다.")
+#         # fallback: state에 news_content가 있다면 그것을 사용 (API 설계에 따라)
+#         # 이 예제에서는 빈 리스트로 처리
+#         state['relevant_chunks'] = []
+#     else:
+#         state['relevant_chunks'] = [doc.page_content for doc in documents]
+#         print(f"✅ ‘{question[:20]}...’에 대해 {len(documents)}개의 관련 문서를 찾았습니다.")
+#     return state
+
 def retrieve_from_chroma_node(state: GraphState):
-    """(성능 개선) ChromaDB에서 news_id를 필터링하여 관련 청크를 검색"""
-    print(f"--- 2a. ChromaDB에서 뉴스 검색 (news_id: {state['news_id']}) ---")
-    embeddings = get_embeddings()
-    chroma_client = get_chroma_client()
-    
-    vectorstore = Chroma(
-        client=chroma_client,
-        collection_name="news_collection", # 사전에 뉴스가 저장된 컬렉션
-        embedding_function=embeddings,
-    )
-    
-    # news_id를 메타데이터 필터로 사용하여 해당 뉴스 기사 내에서만 검색
-    retriever = vectorstore.as_retriever(
-        search_kwargs={'filter': {'news_id': state['news_id']}, "k": 3}
-    )
-    
-    # 재구성된 질문 또는 원본 질문을 사용 (이 예제에서는 원본 사용)
-    question = state['user_question']
-    # documents = retriever.invoke(question)
-    try:
-        documents = retriever.get_relevant_documents(question)
-    except AttributeError:
-        # fallback for retriever implementations that use 'invoke'
-        documents = retriever.invoke(question)
-    
-    if not documents:
-        print(f"⚠️ news_id '{state['news_id']}'에 해당하는 문서를 ChromaDB에서 찾을 수 없습니다.")
-        # fallback: state에 news_content가 있다면 그것을 사용 (API 설계에 따라)
-        # 이 예제에서는 빈 리스트로 처리
+    """
+    크로마DB 미사용 시 테스트 모드:
+    ./test_data/data.txt에서 텍스트를 로드하여 relevant_chunks로 반환
+    """
+    print(f"--- 2a. (TEST MODE) 로컬 텍스트 파일에서 뉴스 로드 ---")
+
+    test_file_path = "./llm-service/test_data/data.txt"
+    if not os.path.exists(test_file_path):
+        print(f"❌ 테스트 데이터 파일이 '{test_file_path}'에 존재하지 않습니다.")
         state['relevant_chunks'] = []
-    else:
-        state['relevant_chunks'] = [doc.page_content for doc in documents]
-        print(f"✅ ‘{question[:20]}...’에 대해 {len(documents)}개의 관련 문서를 찾았습니다.")
+        return state
+
+    loader = TextLoader(test_file_path, encoding="utf-8")
+    documents = loader.load()
+
+    # 필요 시 길이에 따라 나누기
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    split_docs = splitter.split_documents(documents)
+
+    state['relevant_chunks'] = [doc.page_content for doc in split_docs]
+    print(f"✅ 테스트 파일에서 {len(split_docs)}개 청크 로드 완료")
+
     return state
-  
-  
+
+
+def get_tavily_snippets(state: GraphState):
+    """
+    Tavily를 사용해 기업명 + 사용자 질문 기반의 최신 웹 스니펫을 검색하여 반환.
+    """
+    try:
+        question = state.get('user_question')
+        company_name = state.get('company')
+
+        # 검색 쿼리 구성
+        if company_name and question:
+            search_query = f"{company_name} 관련 {question}"
+        else:
+            raise ValueError("검색할 질문과 기업명이 모두 비어 있습니다.")
+        
+        print(f"🔍 Tavily 검색 쿼리: {search_query}")
+
+        # Tavily 검색
+        results = tavily_tool.invoke(search_query)
+
+        snippets = []
+        for item in results.get('results', []):
+            # 검색된 snippet과 출처 URL 함께 구성
+            snippet = f"{item.get('content', '').strip()}\n출처: {item.get('url', '').strip()}"
+            if snippet.strip():
+                snippets.append(snippet)
+
+        print(f"✅ Tavily: {len(snippets)}개 스니펫 검색 완료")
+        state["tavily_snippets"] = snippets
+
+        return state
+
+    except Exception as e:
+        print(f"⚠️ Tavily 검색 실패: {e}")
+        return state
+    
+
+
 def generate_answer_node(state: GraphState):
     print("--- 3a. 답변 생성 ---")
     llm = get_llm()
     prompt = ChatPromptTemplate.from_template(
-        """[뉴스 기사 내용]을 바탕으로 [질문]에 대해 한국어로 명확하고 간결하게 답변하세요.
+        """다음 [뉴스 기사 내용]과 [웹 검색 스니펫]을 참고하여 [질문]에 대해 한국어로 명확하고 간결하게 답변하세요.
         [뉴스 기사 내용]: {context}
+        [기업 관련 검색 스니펫]: {web_snippets}
         [질문]: {question}"""
     )
     rag_chain = prompt | llm | StrOutputParser()
     
+    # Tavily snippet 추가
+    tavily_snippets = state.get('tavily_snippets', [])
+    tavily_context = "\n\n".join(tavily_snippets) if tavily_snippets else "검색된 웹 스니펫 없음."
+
+
     if not state['relevant_chunks']:
         answer = "관련 정보를 찾을 수 없습니다. 뉴스 ID를 확인해주세요."
     else:
         answer = rag_chain.invoke({
             "context": "\n---\n".join(state['relevant_chunks']),
+            "web_snippets": tavily_context,
             "question": state['user_question']
         })
     state['answer'] = clean_llm_output(answer)
@@ -263,6 +356,7 @@ def load_and_summarize_resume_node(state: GraphState):
         pages = loader.load_and_split()
     
     full_text = " ".join([page.page_content for page in pages])
+    full_text = clean_pdf_text(full_text)
 
     # (비용/시간 개선) 전체 텍스트를 한번에 요약하도록 변경
     llm = get_llm()
@@ -272,6 +366,7 @@ def load_and_summarize_resume_node(state: GraphState):
     summary = summarization_chain.invoke({"text": full_text})
     
     state['user_file_summary'] = f"{clean_llm_output(summary)}"
+    print(f"✅ 이력서 요약 완료: {state['user_file_summary']}...")  # 요약의 일부만 출력
     print("✅ 이력서 요약 완료")
     return state
 
@@ -300,6 +395,7 @@ def generate_resume_feedback_node(state: GraphState) -> GraphState:
         질문에 대한 명확한 답변 및 관련 맥락 언급
         뉴스 요약 내용을 반영해 기업 상황과 연계한 인사이트가 있으면 언급
         구체적이고 실질적으로 면접과 준비에 도움이 되는 형태
+        적절한 예시 문장을 포함하여 설명
 
         다른 불필요한 설명은 작성하지 말고, 피드백만 출력하세요.
     """)
@@ -335,6 +431,7 @@ def create_workflow():
     # 노드 등록
     graph.add_node("route_request", route_request_node)
     graph.add_node("retrieve_from_chroma", retrieve_from_chroma_node)
+    graph.add_node("get_tavily_snippets", get_tavily_snippets)
     graph.add_node("generate_answer", generate_answer_node)
     graph.add_node("grade_answer", grade_answer_node)
     graph.add_node("load_and_summarize_resume", load_and_summarize_resume_node)
@@ -353,7 +450,8 @@ def create_workflow():
     )
 
     # Q&A 경로
-    graph.add_edge("retrieve_from_chroma", "generate_answer")
+    graph.add_edge("retrieve_from_chroma", "get_tavily_snippets")
+    graph.add_edge("get_tavily_snippets", "generate_answer")
     graph.add_edge("generate_answer", "grade_answer")
     graph.add_conditional_edges(
         "grade_answer",
@@ -366,14 +464,6 @@ def create_workflow():
 
     # 피드백 경로
     graph.add_edge("load_and_summarize_resume", "generate_resume_feedback")
-    # graph.add_conditional_edges(
-    #     "generate_resume_feedback",
-    #     lambda state: "feedback_generated" if state.get("feedback") else "feedback_failed", # 피드백이 생성되었는지 확인
-    #     {
-    #         "feedback_generated": END,
-    #         "feedback_failed": "load_and_summarize_resume"  # 실패 시 종료 (추후 개선 가능)
-    #     }
-    # )
     graph.add_edge("generate_resume_feedback", END)  # 피드백 생성 후 종료
 
     # 워크플로우를 컴파일하여 반환
@@ -404,12 +494,13 @@ if __name__ == "__main__":
         "user_question": "SK쉴더스가 제로트러스트 모델로 뭘 하려는 건가요?",
         "news_id": 101, # Spring 서버로부터 받은 뉴스 ID
         "file_path": None,
+        "company": "SK쉴더스",  # 회사명 (추후 Tavily 검색에 사용)
         "chat_history": []
     }
     
     try:
         # stream()을 사용하면 각 단계의 출력을 볼 수 있음
-        for output in agent_app.stream(qa_input, {"recursion_limit": 5}):
+        for output in agent_app.stream(qa_input, {"recursion_limit": 10}):
             node_name = list(output.keys())[0]
             node_output = output[node_name]
             print(f"--- 노드 '{node_name}' 실행 완료 ---")
@@ -428,14 +519,15 @@ if __name__ == "__main__":
     print("="*50)
     
     # 테스트용 이력서 파일 생성
-    resume_file = "test_resume.txt"
-    with open(resume_file, "w", encoding="utf-8") as f:
-        f.write("이준기\nPython, Java 개발 경험. LangChain 프로젝트 수행.")
+    resume_file = "./llm-service/file_data/이력서_이준기.pdf"
+    # with open(resume_file, "w", encoding="utf-8") as f:
+    #     f.write("이준기\nPython, Java 개발 경험. LangChain 프로젝트 수행.")
     
     feedback_input = {
         "user_question": "제 이력서에서 자기소개서만 피드백 해주세요.",
         "news_id": None,
         "file_path": resume_file,
+        "company": "SK쉴더스",
         "chat_history": []
     }
 
