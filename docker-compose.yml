@@ -4,6 +4,8 @@ services:
       context: .
       dockerfile: ollama.Dockerfile
     container_name: ollama_svc
+    ports:
+      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
 
@@ -27,13 +29,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - TAVILY_API_KEY=${TAVILY_API_KEY}
-      - CHROMA_HOST=chroma
       - SPRING_SERVER_URL=http://spring-app:8080
-      - VECTOR_DB_HOST=chroma
-      - VECTOR_DB_PORT=8001
+      - VECTOR_DB_HOST=${VECTOR_DB_HOST}
+      - VECTOR_DB_PORT=${VECTOR_DB_PORT}
     entrypoint: ["/app/entrypoint.sh"]
 
 volumes:
