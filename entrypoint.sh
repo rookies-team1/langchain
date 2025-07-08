@@ -7,7 +7,7 @@ ollama serve &
 
 # 서버가 준비될 때까지 대기 (Health Check)
 echo "Waiting for Ollama server to be ready..."
-while ! curl -s -f http://localhost:11434/ > /dev/null; do
+while ! curl -s -f http://ollama:11434/ > /dev/null; do
     echo "Ollama server not yet available, waiting..."
     sleep 1
 done

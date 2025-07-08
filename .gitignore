@@ -12,6 +12,7 @@ __pycache__/
 
 # Data files
 *_data
+*.json
 
 # Distribution / packaging
 .Python

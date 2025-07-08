@@ -1,16 +1,9 @@
 # poetry run python ..
 
 import os
-import sys
-
-from langchain_openai import ChatOpenAI
-
-# llm-service 디렉토리를 sys.path에 추가
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from typing import TypedDict, Optional, List, Dict, Any
 from dotenv import load_dotenv
-from collections import defaultdict
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -21,10 +14,9 @@ from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import LLMChain, RetrievalQA
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
-import json
+
 from chromadb import chromadb
 import re
 
@@ -69,8 +61,8 @@ def get_embeddings():
         try:
             # ChromaDB와 같은 영구적인 저장소를 사용할 것이므로, 일관된 임베딩 모델 사용이 중요
             embeddings = OllamaEmbeddings(
-                model="bge-m3:latest", 
-                base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+                model="bge-m3:567m", 
+                base_url=os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
             )
         except Exception as e:
             print(f"임베딩 모델 로드 실패: {e}")

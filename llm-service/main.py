@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from summarizer import summarize_news
-from chatbot_re import run_langgraph_flow
+
+from . import summarizer
+
 from chat_langgraph_2 import main
 from typing import List, TypedDict, Optional
 import os
@@ -23,8 +24,8 @@ google_api_key = os.getenv("GOOGLE_API_KEY")
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 ollama_base_url = os.getenv("OLLAMA_BASE_URL")
 vector_db_host = os.getenv("VECTOR_DB_HOST", "localhost")
-vector_db_port = os.getenv("VECTOR_DB_PORT", 8000)  # ollama 는 외부 포트 8001
-spring_server_url = os.getenv("SPRING_SERVER_URL", "http://localhost:8080")
+vector_db_port = os.getenv("VECTOR_DB_PORT", 8001)
+spring_server_url = os.getenv("SPRING_SERVER_URL", "http://spring-app:8080")
 
 
 class HistoryMessage(BaseModel):
@@ -55,7 +56,6 @@ def read_root():
 async def chat_endpoint(request: ChatRequest):
     print(f"\n--- 🗣️  세션 ID {request.session_id}에 대한 요청 수신 (뉴스 ID: {request.news_id}) ---")
     
-    news_content = ""
     collection_name = "news_vector_db" # collection_name을 상수로 정의
 
     try:
@@ -74,13 +74,14 @@ async def chat_endpoint(request: ChatRequest):
             print(f"⚠️ ChromaDB에 news_id '{request.news_id}' 없음. Spring 서버에서 원문을 가져와 DB에 저장합니다.")
             
             # 1. Spring 서버에서 뉴스 원문 가져오기
+            news_content = ""
             async with httpx.AsyncClient() as client:
                 # TODO : backend url 수정
-                api_url = f"{spring_server_url}/api/news/{request.news_id}"
+                api_url = f"{spring_server_url}/news/{request.news_id}/detail"
                 print(f"Spring 서버에 뉴스 원문 요청: {api_url}")
                 response = await client.get(api_url, timeout=10.0)
                 response.raise_for_status()
-                news_content = response.text
+                news_content = response.content.decode('utf-8') # 바이트를 문자열로 디코딩
                 print("✅ 뉴스 원문 수신 완료")
 
             # 2. 가져온 원문을 VectorDB에 저장
@@ -99,16 +100,8 @@ async def chat_endpoint(request: ChatRequest):
                 collection_name=collection_name
             )
             print(f"✅ news_id '{request.news_id}'를 VectorDB에 성공적으로 저장했습니다.")
-        
-        # VectorDB에 news_id가 있는 경우, Spring에서 최신 원문만 가져옴
         else:
-            print(f"✅ ChromaDB에서 news_id '{request.news_id}' 확인. Spring 서버에서 원문을 가져옵니다.")
-            async with httpx.AsyncClient() as client:
-                api_url = f"{spring_server_url}/api/news/{request.news_id}"
-                response = await client.get(api_url, timeout=10.0)
-                response.raise_for_status()
-                news_content = response.text
-                print("✅ 뉴스 원문 수신 완료")
+            print(f"✅ ChromaDB에서 news_id '{request.news_id}'를 확인했습니다.")
 
     except httpx.HTTPStatusError as e:
         print(f"🔥 Spring API 오류: {e.response.status_code} - {e.response.text}")
@@ -125,22 +118,24 @@ async def chat_endpoint(request: ChatRequest):
             for msg in request.chat_history
         ]
 
+        # LangGraph에 전달할 입력값 구성 (GraphState에 맞게)
         inputs = {
-            "user_input": request.user_input,
-            "news_content": news_content,
-            "news_id": str(request.news_id), # LangGraph state에 맞게 news_id 전달
-            "company": request.company,
+            "user_question": request.question,
+            "news_id": request.news_id,
+            "file_path": None,  # 이 엔드포인트는 파일 처리를 하지 않음
             "chat_history": lc_chat_history,
         }
 
         final_state = await agent_app.ainvoke(inputs)
-        ai_answer = final_state.get("answer", "오류: 답변을 생성하지 못했습니다.")
+        # 최종 답변은 'answer' 또는 'feedback' 키에 담겨 반환됨
+        ai_answer = final_state.get("answer") or final_state.get("feedback", "오류: 답변을 생성하지 못했습니다.")
         
         print(f"--- ✅ 세션 ID {request.session_id}에 대한 응답 완료 ---")
         
         return ChatResponse(
             session_id=request.session_id,
-            question=request.user_input,
+            chat_message_id=request.chat_message_id,
+            question=request.question,
             answer=ai_answer
         )
         
@@ -164,7 +159,7 @@ class SummarizeResponse(BaseModel):
 @app.post("/summarize", response_model=SummarizeResponse)
 async def summarize(news: SummarizeRequest):
     try:
-        summary = summarize_news(news.dict())
+        summary = summarizer.summarize_news(news.dict())
         return SummarizeResponse(
                 summary=summary,
                 error=False,
@@ -179,32 +174,3 @@ async def summarize(news: SummarizeRequest):
     
 # =========================== summarizer POST 요청 처리 ===========================
     
-    
-
-# LLM 기반 멀티 기능 처리 요청
-# class ChatbotRequest(BaseModel):
-#     user_question: str
-#     resume_path: str = None  # optional
-#     news_content: str = None
-#     news_summary_path: str
-
-# @app.post("/chatbot")
-# def chatbot_router(request: ChatbotRequest):
-#     try:
-#         result = main(
-#             user_question=request.user_question,
-#             resume_path=request.resume_path,
-#             news_content=request.news_content,
-#             news_summary_path=request.news_summary_path
-#         )
-#         return {
-#             "status": "success",
-#             "next_node": result.get("next_node"),
-#             "answer": result.get("answer"),
-#             "feedback": result.get("feedback"),
-#             "chat_history": result.get("chat_history"),
-#         }
-#     except Exception as e:
-#         return {"status": "error", "message": str(e)}
-
-# uvicorn main:app --host 0.0.0.0 --port 8000 --reload
