@@ -16,4 +16,4 @@ echo "Ollama server is ready."
 # 메인 Python 애플리케이션 실행 (FastAPI/Uvicorn 예시)
 # 이 부분이 실제 서비스의 핵심입니다.
 echo "Starting the Python LLM service on port 8000..."
-exec poetry run uvicorn llm-svc.main:app --host 0.0.0.0 --port 8000
+exec poetry run uvicorn llm-service.main:app --host 0.0.0.0 --port 8000

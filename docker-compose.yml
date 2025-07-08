@@ -16,7 +16,9 @@ services:
       - chroma_data:/chroma/chroma
 
   llm-service:
-    build: .
+    build:
+      context: .
+      dockerfile: llm-service.Dockerfile
     image: kwonsoonmin/llm-service:0.1
     container_name: llm-svc
     depends_on:
