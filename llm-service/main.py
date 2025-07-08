@@ -2,14 +2,14 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from summarizer import summarize_news
 from chatbot_re import run_langgraph_flow
-from chat_langgraph import main
+from chat_langgraph_2 import main
 from typing import List, TypedDict, Optional
 import os
 import httpx
 
 from langchain_core.messages import HumanMessage, AIMessage
 # chat_langgraph에서 필요한 함수 및 클래스 추가 임포트
-from chat_langgraph import agent_app, get_chroma_client, get_embeddings
+from chat_langgraph_2 import agent_app, get_chroma_client, get_embeddings
 from langchain_community.vectorstores import Chroma
 # langchain에서 필요한 클래스 추가 임포트
 from langchain.text_splitter import RecursiveCharacterTextSplitter
