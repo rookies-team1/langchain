@@ -96,7 +96,7 @@ def get_chroma_client():
 
 class GraphState(TypedDict):
     # 입력 값
-    user_question: str
+    question: str
     news_id: int  # 뉴스 식별자
     file_path: Optional[str]
     company: Optional[str]  # 기업명 (Tavily 검색에 사용)
@@ -104,19 +104,21 @@ class GraphState(TypedDict):
 
     # 그래프 내부에서 관리되는 값
     input_type: str  # 'qa' or 'feedback'
-    question: str  # 재구성된 질문
+    # question: str  # 재구성된 질문
     
     # QA 경로 관련 상태
     retriever: Optional[Any] # Retriever 객체 저장 (수정: 상태에 retriever 추가)
     relevant_chunks: List[str]
-    answer: str
+    
     is_grounded: bool
     tavily_snippets: Optional[List[str]]  # Tavily 검색 결과 스니펫
 
     # Feedback 경로 관련 상태
     pages: Optional[List]
     user_file_summary: Optional[str]
-    feedback: str
+
+    # 답변 관리
+    answer: str
 
 # ==============================================================================
 # 3. LangGraph 노드 함수 정의
@@ -173,7 +175,7 @@ def route_request_node(state: GraphState) -> dict:
         답변은 반드시 'qa' 또는 'feedback' 단어 하나만 포함해야 합니다."""
     )
     routing_chain = route_prompt | llm | StrOutputParser()
-    result = routing_chain.invoke({"question": state["user_question"]})
+    result = routing_chain.invoke({"question": state["question"]})
     
     cleaned_result = clean_llm_output(result).lower()
     print(f"✅ LLM 분기 판단 결과: {cleaned_result}")
@@ -207,7 +209,7 @@ def route_request_node(state: GraphState) -> dict:
 #     )
     
 #     # 재구성된 질문 또는 원본 질문을 사용 (이 예제에서는 원본 사용)
-#     question = state['user_question']
+#     question = state['question']
 #     # documents = retriever.invoke(question)
 #     try:
 #         documents = retriever.get_relevant_documents(question)
@@ -232,7 +234,7 @@ def retrieve_from_chroma_node(state: GraphState):
     """
     print(f"--- 2a. (TEST MODE) 로컬 텍스트 파일에서 뉴스 로드 ---")
 
-    test_file_path = "./llm-service/test_data/data.txt"
+    test_file_path = "./test_data/data.txt"
     if not os.path.exists(test_file_path):
         print(f"❌ 테스트 데이터 파일이 '{test_file_path}'에 존재하지 않습니다.")
         state['relevant_chunks'] = []
@@ -256,7 +258,7 @@ def get_tavily_snippets(state: GraphState):
     Tavily를 사용해 기업명 + 사용자 질문 기반의 최신 웹 스니펫을 검색하여 반환.
     """
     try:
-        question = state.get('user_question')
+        question = state.get('question')
         company_name = state.get('company')
 
         # 검색 쿼리 구성
@@ -310,7 +312,7 @@ def generate_answer_node(state: GraphState):
         answer = rag_chain.invoke({
             "context": "\n---\n".join(state['relevant_chunks']),
             "web_snippets": tavily_context,
-            "question": state['user_question']
+            "question": state['question']
         })
     state['answer'] = clean_llm_output(answer)
     return state
@@ -328,7 +330,7 @@ def grade_answer_node(state: GraphState):
     grading_chain = prompt | llm | StrOutputParser()
     grade = grading_chain.invoke({
         "context": "\n---\n".join(state['relevant_chunks']),
-        "question": state['user_question'],
+        "question": state['question'],
         "answer": state['answer']
     })
     
@@ -344,6 +346,7 @@ def grade_answer_node(state: GraphState):
 # --- 문서 피드백 경로 ---
 def load_and_summarize_resume_node(state: GraphState):
     print("--- 2b. 이력서 로드 및 요약 ---")
+    # state["file_path"] = "./file_data/이력서_이준기.pdf"
     file_path = state["file_path"]
     if not file_path or not os.path.exists(file_path):
         raise ValueError("피드백을 위한 파일 경로가 유효하지 않습니다.")
@@ -408,13 +411,13 @@ def generate_resume_feedback_node(state: GraphState) -> GraphState:
 
     feedback = feedback_chain.invoke({
         # "context": "\n---\n".join(state['relevant_chunks']),
-        "question": state['user_question'],
+        "question": state['question'],
         "resume_summary": state['user_file_summary']
     })
 
     cleaned_feedback = clean_llm_output(feedback)
 
-    state["feedback"] = cleaned_feedback
+    state["answer"] = cleaned_feedback
 
     print("✅ 맞춤형 이력서 피드백 생성 완료")
     return state
@@ -491,7 +494,7 @@ if __name__ == "__main__":
     # (사전 작업: 별도의 스크립트로 뉴스를 ChromaDB에 저장해야 함)
     
     qa_input = {
-        "user_question": "SK쉴더스가 제로트러스트 모델로 뭘 하려는 건가요?",
+        "question": "SK쉴더스가 제로트러스트 모델로 뭘 하려는 건가요?",
         "news_id": 101, # Spring 서버로부터 받은 뉴스 ID
         "file_path": None,
         "company": "SK쉴더스",  # 회사명 (추후 Tavily 검색에 사용)
@@ -519,12 +522,12 @@ if __name__ == "__main__":
     print("="*50)
     
     # 테스트용 이력서 파일 생성
-    resume_file = "./llm-service/file_data/이력서_이준기.pdf"
+    resume_file = "./file_data/이력서_이준기.pdf"
     # with open(resume_file, "w", encoding="utf-8") as f:
     #     f.write("이준기\nPython, Java 개발 경험. LangChain 프로젝트 수행.")
     
     feedback_input = {
-        "user_question": "제 이력서에서 자기소개서만 피드백 해주세요.",
+        "question": "제 이력서에서 자기소개서만 피드백 해주세요.",
         "news_id": None,
         "file_path": resume_file,
         "company": "SK쉴더스",
@@ -533,7 +536,7 @@ if __name__ == "__main__":
 
     try:
         final_state = agent_app.invoke(feedback_input)
-        print("\n[최종 답변]:", final_state.get('feedback'))
+        print("\n[최종 답변]:", final_state.get('answer'))
     except Exception as e:
         print(f"\n[오류 발생]: {e}")
         

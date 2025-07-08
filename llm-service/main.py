@@ -1,15 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from summarizer import summarize_news
-from chatbot_re import run_langgraph_flow
-from chat_langgraph_2 import main
 from typing import List, TypedDict, Optional
 import os
 import httpx
 
 from langchain_core.messages import HumanMessage, AIMessage
 # chat_langgraph에서 필요한 함수 및 클래스 추가 임포트
-from chat_langgraph import agent_app, get_chroma_client, get_embeddings
+from chat_langgraph_2 import agent_app, get_chroma_client, get_embeddings
 from langchain_community.vectorstores import Chroma
 # langchain에서 필요한 클래스 추가 임포트
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -58,64 +56,64 @@ async def chat_endpoint(request: ChatRequest):
     news_content = ""
     collection_name = "news_vector_db" # collection_name을 상수로 정의
 
-    try:
-        chroma_client = get_chroma_client()
+    # try:
+    #     chroma_client = get_chroma_client()
         
-        try:
-            # 컬렉션이 존재하는지 먼저 확인
-            collection = chroma_client.get_collection(name=collection_name)
-            results = collection.get(where={"news_id": str(request.news_id)}, limit=1)
-        except Exception: 
-            # get_collection에서 컬렉션이 없으면 예외 발생 (정확한 예외 타입은 chromadb 버전에 따라 다를 수 있음)
-            results = {'ids': []} # 결과가 없는 것처럼 처리
+    #     try:
+    #         # 컬렉션이 존재하는지 먼저 확인
+    #         collection = chroma_client.get_collection(name=collection_name)
+    #         results = collection.get(where={"news_id": str(request.news_id)}, limit=1)
+    #     except Exception: 
+    #         # get_collection에서 컬렉션이 없으면 예외 발생 (정확한 예외 타입은 chromadb 버전에 따라 다를 수 있음)
+    #         results = {'ids': []} # 결과가 없는 것처럼 처리
 
-        # VectorDB에 news_id가 없는 경우, Spring에서 가져와 저장
-        if not results or not results.get('ids'):
-            print(f"⚠️ ChromaDB에 news_id '{request.news_id}' 없음. Spring 서버에서 원문을 가져와 DB에 저장합니다.")
+    #     # VectorDB에 news_id가 없는 경우, Spring에서 가져와 저장
+    #     if not results or not results.get('ids'):
+    #         print(f"⚠️ ChromaDB에 news_id '{request.news_id}' 없음. Spring 서버에서 원문을 가져와 DB에 저장합니다.")
             
-            # 1. Spring 서버에서 뉴스 원문 가져오기
-            async with httpx.AsyncClient() as client:
-                # TODO : backend url 수정
-                api_url = f"{spring_server_url}/api/news/{request.news_id}"
-                print(f"Spring 서버에 뉴스 원문 요청: {api_url}")
-                response = await client.get(api_url, timeout=10.0)
-                response.raise_for_status()
-                news_content = response.text
-                print("✅ 뉴스 원문 수신 완료")
+    #         # 1. Spring 서버에서 뉴스 원문 가져오기
+    #         async with httpx.AsyncClient() as client:
+    #             # TODO : backend url 수정
+    #             api_url = f"{spring_server_url}/api/news/{request.news_id}"
+    #             print(f"Spring 서버에 뉴스 원문 요청: {api_url}")
+    #             response = await client.get(api_url, timeout=10.0)
+    #             response.raise_for_status()
+    #             news_content = response.text
+    #             print("✅ 뉴스 원문 수신 완료")
 
-            # 2. 가져온 원문을 VectorDB에 저장
-            print("⏳ 가져온 뉴스 원문을 VectorDB에 저장하는 중...")
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    #         # 2. 가져온 원문을 VectorDB에 저장
+    #         print("⏳ 가져온 뉴스 원문을 VectorDB에 저장하는 중...")
+    #         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
             
-            # Document 객체 생성 및 메타데이터 추가
-            docs = [Document(page_content=chunk, metadata={"news_id": str(request.news_id)}) 
-                    for chunk in text_splitter.split_text(news_content)]
+    #         # Document 객체 생성 및 메타데이터 추가
+    #         docs = [Document(page_content=chunk, metadata={"news_id": str(request.news_id)}) 
+    #                 for chunk in text_splitter.split_text(news_content)]
 
-            # ChromaDB에 저장
-            Chroma.from_documents(
-                documents=docs,
-                embedding=get_embeddings(),
-                client=chroma_client,
-                collection_name=collection_name
-            )
-            print(f"✅ news_id '{request.news_id}'를 VectorDB에 성공적으로 저장했습니다.")
+    #         # ChromaDB에 저장
+    #         Chroma.from_documents(
+    #             documents=docs,
+    #             embedding=get_embeddings(),
+    #             client=chroma_client,
+    #             collection_name=collection_name
+    #         )
+    #         print(f"✅ news_id '{request.news_id}'를 VectorDB에 성공적으로 저장했습니다.")
         
-        # VectorDB에 news_id가 있는 경우, Spring에서 최신 원문만 가져옴
-        else:
-            print(f"✅ ChromaDB에서 news_id '{request.news_id}' 확인. Spring 서버에서 원문을 가져옵니다.")
-            async with httpx.AsyncClient() as client:
-                api_url = f"{spring_server_url}/api/news/{request.news_id}"
-                response = await client.get(api_url, timeout=10.0)
-                response.raise_for_status()
-                news_content = response.text
-                print("✅ 뉴스 원문 수신 완료")
+    #     # VectorDB에 news_id가 있는 경우, Spring에서 최신 원문만 가져옴
+    #     else:
+    #         print(f"✅ ChromaDB에서 news_id '{request.news_id}' 확인. Spring 서버에서 원문을 가져옵니다.")
+    #         async with httpx.AsyncClient() as client:
+    #             api_url = f"{spring_server_url}/api/news/{request.news_id}"
+    #             response = await client.get(api_url, timeout=10.0)
+    #             response.raise_for_status()
+    #             news_content = response.text
+    #             print("✅ 뉴스 원문 수신 완료")
 
-    except httpx.HTTPStatusError as e:
-        print(f"🔥 Spring API 오류: {e.response.status_code} - {e.response.text}")
-        raise HTTPException(status_code=424, detail=f"뉴스 원문(ID: {request.news_id})을 가져오는 데 실패했습니다.")
-    except Exception as e:
-        print(f"🔥 처리 중 예외 발생: {e}")
-        raise HTTPException(status_code=500, detail=f"내부 서버 오류: {e}")
+    # except httpx.HTTPStatusError as e:
+    #     print(f"🔥 Spring API 오류: {e.response.status_code} - {e.response.text}")
+    #     raise HTTPException(status_code=424, detail=f"뉴스 원문(ID: {request.news_id})을 가져오는 데 실패했습니다.")
+    # except Exception as e:
+    #     print(f"🔥 처리 중 예외 발생: {e}")
+    #     raise HTTPException(status_code=500, detail=f"내부 서버 오류: {e}")
 
     # --- LangGraph 에이전트 실행 ---
     try:
@@ -126,9 +124,9 @@ async def chat_endpoint(request: ChatRequest):
         ]
 
         inputs = {
-            "user_input": request.user_input,
-            "news_content": news_content,
-            "news_id": str(request.news_id), # LangGraph state에 맞게 news_id 전달
+            "question": request.question,
+            "news_id": request.news_id,
+            "file_path": None,  # 현재는 사용하지 않음
             "company": request.company,
             "chat_history": lc_chat_history,
         }
@@ -140,7 +138,8 @@ async def chat_endpoint(request: ChatRequest):
         
         return ChatResponse(
             session_id=request.session_id,
-            question=request.user_input,
+            chat_message_id=request.chat_message_id,
+            question=request.question,
             answer=ai_answer
         )
         
