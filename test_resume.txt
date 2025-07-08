@@ -1,0 +1,2 @@
+이준기
+Python, Java 개발 경험. LangChain 프로젝트 수행.

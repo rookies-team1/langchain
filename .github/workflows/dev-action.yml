@@ -9,7 +9,7 @@ on:
 
 env:
   DOCKER_IMAGE: llm-service
-  DOCKER_TAG: dev0.1
+  DOCKER_TAG: dev0.2
 
 jobs:
   Docker:
