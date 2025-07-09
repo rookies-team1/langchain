@@ -34,6 +34,11 @@ services:
       - VECTOR_DB_PORT=${VECTOR_DB_PORT}
     entrypoint: ["/app/entrypoint.sh"]
 
+networks:
+  default:
+    name: shared-network
+    external: true
+
 volumes:
   ollama_data:
   chroma_data:
