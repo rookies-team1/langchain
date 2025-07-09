@@ -130,6 +130,10 @@ class GraphState(TypedDict):
 def clean_llm_output(text: str) -> str:
     # LLM의 출력물에서 필요 없는 태그/마크다운/불필요한 줄바꿈 정리
 
+    # 불필요한 역슬래시 2개 이상 → 1개로 치환
+    text = re.sub(r'\\\\+', r'\\', text)
+    # \_ → _ 로 변환 (필요시)
+    text = text.replace('\\_', '_')
     # <think>...</think> 블록 제거
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     # 출력 시작/끝에 markdown block이 남는 경우 제거
