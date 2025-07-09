@@ -152,9 +152,14 @@ async def chat_with_file(
         inputs = {
             "question": parsed_request.question,
             "news_id": parsed_request.news_id,
-            "file_path": temp_path,
             "chat_history": lc_chat_history,
+            "company": parsed_request.company
         }
+        if temp_path:
+            inputs["file_path"] = temp_path
+        else:
+            inputs["file_path"] = None
+        
 
         final_state = await agent_app.ainvoke(inputs)
         # 최종 답변은 'answer' 또는 'feedback' 키에 담겨 반환됨

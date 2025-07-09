@@ -234,7 +234,7 @@ def retrieve_from_chroma_node(state: GraphState):
     """
     print(f"--- 2a. (TEST MODE) 로컬 텍스트 파일에서 뉴스 로드 ---")
 
-    test_file_path = "./test_data/data.txt"
+    test_file_path = "./llm-service/test_data/data.txt"
     if not os.path.exists(test_file_path):
         print(f"❌ 테스트 데이터 파일이 '{test_file_path}'에 존재하지 않습니다.")
         state['relevant_chunks'] = []
@@ -346,7 +346,6 @@ def grade_answer_node(state: GraphState):
 # --- 문서 피드백 경로 ---
 def load_and_summarize_resume_node(state: GraphState):
     print("--- 2b. 이력서 로드 및 요약 ---")
-    # state["file_path"] = "./file_data/이력서_이준기.pdf"
     file_path = state["file_path"]
     if not file_path or not os.path.exists(file_path):
         raise ValueError("피드백을 위한 파일 경로가 유효하지 않습니다.")
