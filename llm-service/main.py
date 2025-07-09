@@ -21,8 +21,9 @@ from fastapi import UploadFile, File, Form
 import json
 import tempfile
 
-
+# --- 로컬 테스트 실행 ----
 # uvicorn llm-service.main:app --host 0.0.0.0 --port 8000 --reload
+# chroma run --host localhost --port 8001
 
 
 app = FastAPI(title="AI Agent API")
