@@ -30,7 +30,7 @@ from chromadb import chromadb
 import re
 import chromadb
 
-chroma_client = chromadb.HttpClient(host="localhost", port=8001)
+# chroma_client = chromadb.HttpClient(host="localhost", port=8001)
 
 # ==============================================================================
 # 1. 초기화 및 설정
@@ -509,16 +509,7 @@ def create_workflow():
 
     # Q&A 경로
     graph.add_edge("get_tavily_snippets", "generate_answer")
-    # graph.add_edge("generate_answer", "grade_answer")
     graph.add_edge("generate_answer", END)
-    # graph.add_conditional_edges(
-    #     "grade_answer",
-    #     lambda state: "grounded" if state.get("is_grounded", False) else "not_grounded",
-    #     {
-    #         "grounded": END,
-    #         "not_grounded": "generate_answer"  # (수정) 실패 시 답변 재생성 (Self-Correction)
-    #     }
-    # )
 
     # 피드백 경로
     graph.add_edge("load_and_summarize_resume", "generate_resume_feedback")
@@ -562,7 +553,6 @@ if __name__ == "__main__":
             node_name = list(output.keys())[0]
             node_output = output[node_name]
             print(f"--- 노드 '{node_name}' 실행 완료 ---")
-            # print(f"상태: {node_output}\n")
         
         final_state = agent_app.invoke(qa_input)
         print("\n[최종 답변]:", final_state.get('answer'))
@@ -578,8 +568,6 @@ if __name__ == "__main__":
     
     # 테스트용 이력서 파일 생성
     resume_file = "./file_data/이력서_이준기.pdf"
-    # with open(resume_file, "w", encoding="utf-8") as f:
-    #     f.write("이준기\nPython, Java 개발 경험. LangChain 프로젝트 수행.")
     
     feedback_input = {
         "question": "제 이력서에서 자기소개서만 피드백 해주세요.",
@@ -595,7 +583,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n[오류 발생]: {e}")
         
-    # # 그래프 시각화
+    # 그래프 시각화
     # try:
     #     graph_image_path = "agent_workflow.png"
     #     with open(graph_image_path, "wb") as f:
