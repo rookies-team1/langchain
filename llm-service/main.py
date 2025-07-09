@@ -27,7 +27,6 @@ import tempfile
 # chroma run --host localhost --port 8001
 
 
-
 app = FastAPI(title="AI Agent API")
 
 # 환경 변수에서 API 키 로드

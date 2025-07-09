@@ -164,8 +164,6 @@ def clean_pdf_text(text: str) -> str:
     return text.strip()
 
 
-
-
 # --- 라우팅 노드 ---
 def route_request_node(state: GraphState) -> dict:
     """사용자 질문을 분석하여 다음 단계를 결정하는 라우터"""
@@ -194,66 +192,66 @@ def route_request_node(state: GraphState) -> dict:
     
     
 # --- 뉴스 Q&A 경로 ---
-# def retrieve_from_chroma_node(state: GraphState):
-#     """(성능 개선) ChromaDB에서 news_id를 필터링하여 관련 청크를 검색"""
-#     print(f"--- 2a. ChromaDB에서 뉴스 검색 (news_id: {state['news_id']}) ---")
-#     embeddings = get_embeddings()
-#     chroma_client = get_chroma_client()
-    
-#     vectorstore = Chroma(
-#         client=chroma_client,
-#         collection_name="news_collection", # 사전에 뉴스가 저장된 컬렉션
-#         embedding_function=embeddings,
-#     )
-    
-#     # news_id를 메타데이터 필터로 사용하여 해당 뉴스 기사 내에서만 검색
-#     retriever = vectorstore.as_retriever(
-#         search_kwargs={'filter': {'news_id': state['news_id']}, "k": 3}
-#     )
-    
-#     # 재구성된 질문 또는 원본 질문을 사용 (이 예제에서는 원본 사용)
-#     question = state['question']
-#     # documents = retriever.invoke(question)
-#     try:
-#         documents = retriever.get_relevant_documents(question)
-#     except AttributeError:
-#         # fallback for retriever implementations that use 'invoke'
-#         documents = retriever.invoke(question)
-    
-#     if not documents:
-#         print(f"⚠️ news_id '{state['news_id']}'에 해당하는 문서를 ChromaDB에서 찾을 수 없습니다.")
-#         # fallback: state에 news_content가 있다면 그것을 사용 (API 설계에 따라)
-#         # 이 예제에서는 빈 리스트로 처리
-#         state['relevant_chunks'] = []
-#     else:
-#         state['relevant_chunks'] = [doc.page_content for doc in documents]
-#         print(f"✅ ‘{question[:20]}...’에 대해 {len(documents)}개의 관련 문서를 찾았습니다.")
-#     return state
-
 def retrieve_from_chroma_node(state: GraphState):
-    """
-    크로마DB 미사용 시 테스트 모드:
-    ./test_data/data.txt에서 텍스트를 로드하여 relevant_chunks로 반환
-    """
-    print(f"--- 2a. (TEST MODE) 로컬 텍스트 파일에서 뉴스 로드 ---")
-
-    test_file_path = "./llm-service/test_data/data.txt"
-    if not os.path.exists(test_file_path):
-        print(f"❌ 테스트 데이터 파일이 '{test_file_path}'에 존재하지 않습니다.")
+    """(성능 개선) ChromaDB에서 news_id를 필터링하여 관련 청크를 검색"""
+    print(f"--- 2a. ChromaDB에서 뉴스 검색 (news_id: {state['news_id']}) ---")
+    embeddings = get_embeddings()
+    chroma_client = get_chroma_client()
+    
+    vectorstore = Chroma(
+        client=chroma_client,
+        collection_name="news_collection", # 사전에 뉴스가 저장된 컬렉션
+        embedding_function=embeddings,
+    )
+    
+    # news_id를 메타데이터 필터로 사용하여 해당 뉴스 기사 내에서만 검색
+    retriever = vectorstore.as_retriever(
+        search_kwargs={'filter': {'news_id': state['news_id']}, "k": 3}
+    )
+    
+    # 재구성된 질문 또는 원본 질문을 사용 (이 예제에서는 원본 사용)
+    question = state['question']
+    # documents = retriever.invoke(question)
+    try:
+        documents = retriever.get_relevant_documents(question)
+    except AttributeError:
+        # fallback for retriever implementations that use 'invoke'
+        documents = retriever.invoke(question)
+    
+    if not documents:
+        print(f"⚠️ news_id '{state['news_id']}'에 해당하는 문서를 ChromaDB에서 찾을 수 없습니다.")
+        # fallback: state에 news_content가 있다면 그것을 사용 (API 설계에 따라)
+        # 이 예제에서는 빈 리스트로 처리
         state['relevant_chunks'] = []
-        return state
-
-    loader = TextLoader(test_file_path, encoding="utf-8")
-    documents = loader.load()
-
-    # 필요 시 길이에 따라 나누기
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    split_docs = splitter.split_documents(documents)
-
-    state['relevant_chunks'] = [doc.page_content for doc in split_docs]
-    print(f"✅ 테스트 파일에서 {len(split_docs)}개 청크 로드 완료")
-
+    else:
+        state['relevant_chunks'] = [doc.page_content for doc in documents]
+        print(f"✅ ‘{question[:20]}...’에 대해 {len(documents)}개의 관련 문서를 찾았습니다.")
     return state
+
+# def retrieve_from_chroma_node(state: GraphState):
+#     """
+#     크로마DB 미사용 시 테스트 모드:
+#     ./test_data/data.txt에서 텍스트를 로드하여 relevant_chunks로 반환
+#     """
+#     print(f"--- 2a. (TEST MODE) 로컬 텍스트 파일에서 뉴스 로드 ---")
+
+#     test_file_path = "./llm-service/test_data/data.txt"
+#     if not os.path.exists(test_file_path):
+#         print(f"❌ 테스트 데이터 파일이 '{test_file_path}'에 존재하지 않습니다.")
+#         state['relevant_chunks'] = []
+#         return state
+
+#     loader = TextLoader(test_file_path, encoding="utf-8")
+#     documents = loader.load()
+
+#     # 필요 시 길이에 따라 나누기
+#     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+#     split_docs = splitter.split_documents(documents)
+
+#     state['relevant_chunks'] = [doc.page_content for doc in split_docs]
+#     print(f"✅ 테스트 파일에서 {len(split_docs)}개 청크 로드 완료")
+
+#     return state
 
 
 def get_tavily_snippets(state: GraphState):
