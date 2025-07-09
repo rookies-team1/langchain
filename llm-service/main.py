@@ -67,7 +67,8 @@ async def chat_with_file(
     request: str = Form(...),             
     file: Optional[UploadFile] = File(None)
 ):
-    parsed_request = ChatRequest(**json.loads(request))
+    request_dict = json.loads(request)
+    parsed_request = ChatRequest(**request_dict)
     
     temp_path = None    
     
