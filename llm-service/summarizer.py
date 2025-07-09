@@ -6,9 +6,29 @@ from langchain_core.prompts import PromptTemplate
 from langchain_ollama import OllamaLLM
 import re
 
+
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+def get_llm():
+    """LLM 인스턴스를 가져옵니다. 없으면 생성합니다."""
+    global llm
+    if llm is None:
+        load_dotenv()
+        # llm = ChatGoogleGenerativeAI(
+        #     model="gemini-2.5-pro",
+        #     temperature=0.7,
+        #     max_tokens=None,
+        #     timeout=None,
+        #     max_retries=2,
+        # )
+        llm = ChatOpenAI(
+            api_key=OPENAI_API_KEY,
+            base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            temperature=0.7
+        )
+    return llm
 
 prompt = PromptTemplate(
     input_variables=["title", "content"],
