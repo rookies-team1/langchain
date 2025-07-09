@@ -37,27 +37,27 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
 
-      # - name: Deploy to EC2
-      #   uses: appleboy/ssh-action@v1.0.0
-      #   with:
-      #     host: ${{ secrets.EC2_HOST }}
-      #     username: ec2-user
-      #     key: ${{ secrets.EC2_SSH_KEY }}
-      #     script: |
-      #       cd ~
-      #       if [ ! -d "${{ env.PROJECT_DIRECTORY }}" ]; then
-      #         git clone https://github.com/rookies-team1/langchain.git ${{ env.PROJECT_DIRECTORY }}
-      #       fi
-      #       cd ${{ env.PROJECT_DIRECTORY }}
-      #       git pull origin main
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~
+            if [ ! -d "${{ env.PROJECT_DIRECTORY }}" ]; then
+              git clone https://github.com/rookies-team1/langchain.git ${{ env.PROJECT_DIRECTORY }}
+            fi
+            cd ${{ env.PROJECT_DIRECTORY }}
+            git pull origin main
                       
-      #       echo "OLLAMA_BASE_URL=${{ secrets.OLLAMA_BASE_URL }}" > .env
-      #       echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
-      #       echo "TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}" > .env
-      #       echo "VECTOR_DB_PORT=${{ secrets.VECTOR_DB_PORT }}" >> .env
-      #       echo "VECTOR_DB_HOST=${{ secrets.VECTOR_DB_HOST }}" >> .env
-      #       docker-compose pull
-      #       docker-compose up -d
+            echo "OLLAMA_BASE_URL=${{ secrets.OLLAMA_BASE_URL }}" > .env
+            echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
+            echo "TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}" > .env
+            echo "VECTOR_DB_PORT=${{ secrets.VECTOR_DB_PORT }}" >> .env
+            echo "VECTOR_DB_HOST=${{ secrets.VECTOR_DB_HOST }}" >> .env
+            docker-compose pull
+            docker-compose up -d
 
       # 빌드 결과 출력
       - name: Image digest
