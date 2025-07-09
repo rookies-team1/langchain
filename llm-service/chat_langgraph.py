@@ -30,7 +30,7 @@ from chromadb import chromadb
 import re
 import chromadb
 
-client = chromadb.HttpClient(host="localhost", port=8001)
+chroma_client = chromadb.HttpClient(host="localhost", port=8001)
 
 # ==============================================================================
 # 1. 초기화 및 설정
@@ -38,7 +38,6 @@ client = chromadb.HttpClient(host="localhost", port=8001)
 
 llm = None
 embeddings = None
-chroma_client = None
 tavily_tool = TavilySearch(k=3)
 
 load_dotenv()
