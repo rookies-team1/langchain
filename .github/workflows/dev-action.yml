@@ -29,13 +29,13 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       # Docker 이미지 빌드 및 푸시
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./llm-service.Dockerfile
-          push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+      # - name: Build and push Docker image
+      #   uses: docker/build-push-action@v5
+      #   with:
+      #     context: .
+      #     file: ./llm-service.Dockerfile
+      #     push: true
+      #     tags: ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
 
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.0
