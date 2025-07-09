@@ -216,10 +216,10 @@ async def summarize(news: SummarizeRequest):
         try:
             # 컬렉션이 존재하는지 먼저 확인
             collection = chroma_client.get_collection(name=collection_name)
-            results = collection.get(where={"id": str(news.id)}, limit=1)
+            results = collection.get(where={"news_id": str(news.id)}, limit=1)
         except Exception: 
             # get_collection에서 컬렉션이 없으면 예외 발생 (정확한 예외 타입은 chromadb 버전에 따라 다를 수 있음)
-            results = {'ids': []} # 결과가 없는 것처럼 처리
+            results = {'ids': []}  # 결과가 없는 것처럼 처리
 
         # VectorDB에 news_id가 없는 경우, Spring에서 가져와 저장
         if not results or not results.get('ids'):
@@ -264,9 +264,7 @@ async def summarize(news: SummarizeRequest):
     
     # LangChain에 전달할 입력값 구성  
     summary_text = summarize_news({
-        # "id": news.id,
-        "title": news.title,
-        "content": news.content
+        "id": news.id
     })
     
     print(f"✅ LangChain 처리 완료")

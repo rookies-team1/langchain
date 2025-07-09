@@ -1,7 +1,7 @@
 import chromadb
 
 collection_name = "news_vector_db"
-news_id_to_check = "1"   # 보고 싶은 뉴스 ID (str)
+news_id_to_check = "3"   # 보고 싶은 뉴스 ID (str)
 
 # 1️⃣ ChromaDB 클라이언트 생성
 client = chromadb.HttpClient(host="localhost", port=8001)
