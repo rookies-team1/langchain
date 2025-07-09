@@ -150,10 +150,12 @@ async def chat_with_file(
 
         # LangGraph에 전달할 입력값 구성 (GraphState에 맞게)
         inputs = {
+            "session_id": parsed_request.session_id,
+            "user_id": parsed_request.user_id,
             "question": parsed_request.question,
             "news_id": parsed_request.news_id,
-            "chat_history": lc_chat_history,
-            "company": parsed_request.company
+            "company": parsed_request.company,
+            "chat_history": lc_chat_history
         }
         if temp_path:
             inputs["file_path"] = temp_path

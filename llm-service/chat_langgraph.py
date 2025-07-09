@@ -28,6 +28,9 @@ import json
 from langchain_community.vectorstores import Chroma
 from chromadb import chromadb
 import re
+import chromadb
+
+client = chromadb.HttpClient(host="localhost", port=8001)
 
 # ==============================================================================
 # 1. 초기화 및 설정
@@ -96,12 +99,13 @@ def get_chroma_client():
 
 class GraphState(TypedDict):
     # 입력 값
+    session_id: int
+    user_id: int
     question: str
     news_id: int  # 뉴스 식별자
     file_path: Optional[str]
     company: Optional[str]  # 기업명 (Tavily 검색에 사용)
     chat_history: List[BaseMessage]
-
     # 그래프 내부에서 관리되는 값
     input_type: str  # 'qa' or 'feedback'
     # question: str  # 재구성된 질문
@@ -345,31 +349,72 @@ def grade_answer_node(state: GraphState):
 
 # --- 문서 피드백 경로 ---
 def load_and_summarize_resume_node(state: GraphState):
+
     print("--- 2b. 이력서 로드 및 요약 ---")
-    file_path = state["file_path"]
+
+    file_path = state['file_path']
+
     if not file_path or not os.path.exists(file_path):
-        raise ValueError("피드백을 위한 파일 경로가 유효하지 않습니다.")
+        print("📂 파일 경로가 없으므로 ChromaDB에서 기존 요약을 조회합니다.")
+        chroma_client = get_chroma_client()
+        collection = chroma_client.get_or_create_collection(name="user_resume_db")
 
-    if file_path.lower().endswith(".pdf"):
-        loader = PyPDFLoader(file_path)
-        pages = loader.load_and_split()
-    else: # txt
-        loader = TextLoader(file_path, encoding='utf-8')
-        pages = loader.load_and_split()
+        query_id = f"{state['session_id']}_{state['user_id']}"
+        results = collection.get(ids=[query_id])
+        
+        if results and results.get('documents'):
+            state['user_file_summary'] = results['documents'][0]
+            print(f"✅ ChromaDB에서 이력서 요약 복원 완료: {state['user_file_summary'][:50]}...")
+            return state
+        else:
+            raise ValueError(
+                f"파일 경로가 없고 ChromaDB에도 요약된 파일이 없습니다. "
+                f"세션 {state.get('session_id')}, 사용자 {state.get('user_id')}. "
+                "피드백을 원하는 파일을 첨부해 주세요."
+            )
     
-    full_text = " ".join([page.page_content for page in pages])
-    full_text = clean_pdf_text(full_text)
+    else:
+        if file_path.lower().endswith(".pdf"):
+            loader = PyPDFLoader(file_path)
+            pages = loader.load_and_split()
+        else: # txt
+            loader = TextLoader(file_path, encoding='utf-8')
+            pages = loader.load_and_split()
+        
+        full_text = " ".join([page.page_content for page in pages])
+        full_text = clean_pdf_text(full_text)
 
-    # (비용/시간 개선) 전체 텍스트를 한번에 요약하도록 변경
-    llm = get_llm()
-    prompt = ChatPromptTemplate.from_template(
-        "다음 이력서/포트폴리오의 핵심 역량과 프로젝트 경험을 3~5 문장으로 요약해줘.\n\n{text}")
-    summarization_chain = prompt | llm | StrOutputParser()
-    summary = summarization_chain.invoke({"text": full_text})
-    
-    state['user_file_summary'] = f"{clean_llm_output(summary)}"
-    print(f"✅ 이력서 요약 완료: {state['user_file_summary']}...")  # 요약의 일부만 출력
-    print("✅ 이력서 요약 완료")
+        # (비용/시간 개선) 전체 텍스트를 한번에 요약하도록 변경
+        llm = get_llm()
+        prompt = ChatPromptTemplate.from_template(
+            "다음 이력서/포트폴리오의 핵심 역량과 프로젝트 경험을 3~5 문장으로 요약해줘.\n\n{text}")
+        summarization_chain = prompt | llm | StrOutputParser()
+        summary = summarization_chain.invoke({"text": full_text})
+        
+        state['user_file_summary'] = f"{clean_llm_output(summary)}"
+        print(f"✅ 이력서 요약 완료: {state['user_file_summary']}...")  # 요약의 일부만 출력
+        print("✅ 이력서 요약 완료")
+
+        # ---- store uploaded file summary text to chromadb -----
+
+        # ChromaDB에 summary_text를 저장
+        chroma_client = get_chroma_client()
+        collection = chroma_client.get_or_create_collection(name="user_resume_db")
+
+        metadata = {
+            "session_id": state['session_id'],
+            "user_id": state['user_id'],
+            "type": "resume_summary"
+        }
+
+        # ChromaDB에 summary_text를 저장 (내용 기반 검색이 필요 없으므로 dummy 임베딩 사용 가능)
+        collection.add(
+            documents=[state['user_file_summary']],
+            metadatas=[metadata],
+            ids=[f"{state['session_id']}_{state['user_id']}"]
+        )
+        print(f"✅ 이력서 요약 내용을 ChromaDB에 저장 완료 (id={state['session_id']}_{state['user_id']})")
+
     return state
 
 def generate_resume_feedback_node(state: GraphState) -> GraphState:
