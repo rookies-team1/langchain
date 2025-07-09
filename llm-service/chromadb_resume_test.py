@@ -12,6 +12,6 @@ result = collection.get(ids=["1_1"])
 # 4. 내용 확인
 print("✅ 저장된 ID:", result['ids'])
 print("✅ 저장된 문서 요약:")
-print(result['documents'][1])
+print(result['documents'][0])
 print("✅ 저장된 메타데이터:")
-print(result['metadatas'][1])
+print(result['metadatas'][0])

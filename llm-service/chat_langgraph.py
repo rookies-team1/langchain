@@ -25,7 +25,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_ollama import OllamaEmbeddings
 import json
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from chromadb import chromadb
 import re
 import chromadb
@@ -109,9 +109,9 @@ class GraphState(TypedDict):
     input_type: str  # 'qa' or 'feedback'
     # question: str  # 재구성된 질문
     
+    relevant_chunks: List[str]
     # QA 경로 관련 상태
     retriever: Optional[Any] # Retriever 객체 저장 (수정: 상태에 retriever 추가)
-    relevant_chunks: List[str]
     
     is_grounded: bool
     tavily_snippets: Optional[List[str]]  # Tavily 검색 결과 스니펫
@@ -162,12 +162,79 @@ def clean_pdf_text(text: str) -> str:
     # (필요 시 커스텀)
     
     return text.strip()
+import json
+
+def retrieve_from_chroma_node(state: GraphState) -> GraphState:
+    """ChromaDB에서 news_id를 필터링하여 관련 뉴스 청크를 검색하여 state['relevant_chunks']에 할당."""
+
+    print(f"--- 1. ChromaDB 뉴스 검색 시작 (news_id={state['news_id']}) ---")
+    
+    embeddings = get_embeddings()
+    chroma_client = get_chroma_client()
+    
+    vectorstore = Chroma(
+        client=chroma_client,
+        collection_name="news_vector_db",
+        embedding_function=embeddings,
+    )
+    
+    news_id_filter = str(state['news_id'])
+    
+    retriever = vectorstore.as_retriever(
+        search_kwargs={
+            'filter': {'news_id': news_id_filter},
+            'k': 5  # 필요시 개수 조정
+        }
+    )
+    
+    question = state['question']
+    
+    try:
+        if hasattr(retriever, 'invoke'):
+            documents = retriever.invoke(question)
+        else:
+            documents = retriever.get_relevant_documents(question)
+    except Exception as e:
+        print(f"❌ Chroma 검색 중 오류 발생: {e}")
+        state['relevant_chunks'] = []
+        return state
+
+    if not documents:
+        print(f"⚠️ news_id '{news_id_filter}'에 해당하는 관련 청크를 찾을 수 없습니다.")
+        state['relevant_chunks'] = []
+        return state
+
+    extracted_chunks = []
+    for idx, doc in enumerate(documents):
+        raw_content = doc.page_content.strip()
+        if not raw_content:
+            print(f"⚠️ 빈 콘텐츠 발견 (index={idx}), 스킵합니다.")
+            continue
+
+        try:
+            # JSON 형식이라 판단되면 파싱 시도
+            if raw_content.startswith('{') and raw_content.endswith('}'):
+                parsed_json = json.loads(raw_content)
+                # data.contents 경로에 실제 텍스트가 있을 경우만 추출
+                extracted_text = parsed_json.get("data", {}).get("contents", raw_content)
+            else:
+                extracted_text = raw_content
+        except Exception as e:
+            print(f"⚠️ JSON 파싱 실패, 전체 raw_content 사용 (index={idx}): {e}")
+            extracted_text = raw_content
+
+        extracted_chunks.append(extracted_text)
+
+    state['relevant_chunks'] = extracted_chunks
+
+    print(f"✅ 검색 완료: '{question[:30]}...' 에 대해 {len(extracted_chunks)}개의 관련 청크를 할당했습니다.")
+    return state
 
 
 # --- 라우팅 노드 ---
 def route_request_node(state: GraphState) -> dict:
     """사용자 질문을 분석하여 다음 단계를 결정하는 라우터"""
-    print("--- 1. 요청 라우팅 ---")
+    print("--- 2. 요청 라우팅 ---")
     llm = get_llm()
     route_prompt = ChatPromptTemplate.from_template(
         """사용자 질문 '{question}'은 다음 중 어떤 유형에 가장 가깝습니까?
@@ -192,72 +259,11 @@ def route_request_node(state: GraphState) -> dict:
     
     
 # --- 뉴스 Q&A 경로 ---
-def retrieve_from_chroma_node(state: GraphState):
-    """(성능 개선) ChromaDB에서 news_id를 필터링하여 관련 청크를 검색"""
-    print(f"--- 2a. ChromaDB에서 뉴스 검색 (news_id: {state['news_id']}) ---")
-    embeddings = get_embeddings()
-    chroma_client = get_chroma_client()
-    
-    vectorstore = Chroma(
-        client=chroma_client,
-        collection_name="news_collection", # 사전에 뉴스가 저장된 컬렉션
-        embedding_function=embeddings,
-    )
-    
-    # news_id를 메타데이터 필터로 사용하여 해당 뉴스 기사 내에서만 검색
-    retriever = vectorstore.as_retriever(
-        search_kwargs={'filter': {'news_id': state['news_id']}, "k": 3}
-    )
-    
-    # 재구성된 질문 또는 원본 질문을 사용 (이 예제에서는 원본 사용)
-    question = state['question']
-    # documents = retriever.invoke(question)
-    try:
-        documents = retriever.get_relevant_documents(question)
-    except AttributeError:
-        # fallback for retriever implementations that use 'invoke'
-        documents = retriever.invoke(question)
-    
-    if not documents:
-        print(f"⚠️ news_id '{state['news_id']}'에 해당하는 문서를 ChromaDB에서 찾을 수 없습니다.")
-        # fallback: state에 news_content가 있다면 그것을 사용 (API 설계에 따라)
-        # 이 예제에서는 빈 리스트로 처리
-        state['relevant_chunks'] = []
-    else:
-        state['relevant_chunks'] = [doc.page_content for doc in documents]
-        print(f"✅ ‘{question[:20]}...’에 대해 {len(documents)}개의 관련 문서를 찾았습니다.")
-    return state
-
-# def retrieve_from_chroma_node(state: GraphState):
-#     """
-#     크로마DB 미사용 시 테스트 모드:
-#     ./test_data/data.txt에서 텍스트를 로드하여 relevant_chunks로 반환
-#     """
-#     print(f"--- 2a. (TEST MODE) 로컬 텍스트 파일에서 뉴스 로드 ---")
-
-#     test_file_path = "./llm-service/test_data/data.txt"
-#     if not os.path.exists(test_file_path):
-#         print(f"❌ 테스트 데이터 파일이 '{test_file_path}'에 존재하지 않습니다.")
-#         state['relevant_chunks'] = []
-#         return state
-
-#     loader = TextLoader(test_file_path, encoding="utf-8")
-#     documents = loader.load()
-
-#     # 필요 시 길이에 따라 나누기
-#     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-#     split_docs = splitter.split_documents(documents)
-
-#     state['relevant_chunks'] = [doc.page_content for doc in split_docs]
-#     print(f"✅ 테스트 파일에서 {len(split_docs)}개 청크 로드 완료")
-
-#     return state
-
-
 def get_tavily_snippets(state: GraphState):
     """
     Tavily를 사용해 기업명 + 사용자 질문 기반의 최신 웹 스니펫을 검색하여 반환.
     """
+    print("--- 3a. Taviliy search ---")
     try:
         question = state.get('question')
         company_name = state.get('company')
@@ -292,7 +298,7 @@ def get_tavily_snippets(state: GraphState):
 
 
 def generate_answer_node(state: GraphState):
-    print("--- 3a. 답변 생성 ---")
+    print("--- 4a. 답변 생성 ---")
     llm = get_llm()
     prompt = ChatPromptTemplate.from_template(
         """다음 [뉴스 기사 내용]과 [웹 검색 스니펫]을 참고하여 [질문]에 대해 한국어로 명확하고 간결하게 답변하세요.
@@ -319,7 +325,7 @@ def generate_answer_node(state: GraphState):
     return state
 
 def grade_answer_node(state: GraphState):
-    print("--- 4a. 답변 검증 ---")
+    print("--- 5a. 답변 검증 ---")
     llm = get_llm()
     prompt = ChatPromptTemplate.from_template(
         """[뉴스 기사 내용]을 볼 때, [생성된 답변]이 [질문]에 대해 사실에 근거하는지 평가해주세요.
@@ -347,7 +353,7 @@ def grade_answer_node(state: GraphState):
 # --- 문서 피드백 경로 ---
 def load_and_summarize_resume_node(state: GraphState):
 
-    print("--- 2b. 이력서 로드 및 요약 ---")
+    print("--- 3b. 이력서 로드 및 요약 ---")
 
     file_path = state['file_path']
 
@@ -361,7 +367,7 @@ def load_and_summarize_resume_node(state: GraphState):
         
         if results and results.get('documents'):
             state['user_file_summary'] = results['documents'][0]
-            print(f"✅ ChromaDB에서 이력서 요약 복원 완료: {state['user_file_summary'][:50]}...")
+            print(f"✅ ChromaDB에서 이력서 요약 복원 완료: {state['user_file_summary']}...")
             return state
         else:
             raise ValueError(
@@ -419,7 +425,7 @@ def generate_resume_feedback_node(state: GraphState) -> GraphState:
     이력서  요약된 내용 + 질문 + 기업 뉴스 요약 기반으로
     맞춤형 피드백을 생성하여 state["feedback"] 에 저장
     """
-    print("--- 3b. 맞춤형 이력서 피드백 생성 ---")
+    print("--- 4b. 맞춤형 이력서 피드백 생성 ---")
     
     llm = get_llm()
 
@@ -434,6 +440,9 @@ def generate_resume_feedback_node(state: GraphState) -> GraphState:
         다음은 이력서의 항목별 요약 내용입니다:
         \"\"\"{resume_summary}\"\"\"
 
+        # 다음은 지원하려는 기업의 최근 뉴스 요약입니다:
+        \"\"\"{context}\"\"\"
+                                                       
         위 정보를 바탕으로 아래 조건에 맞게 한국어로 구체적으로 피드백을 작성해 주세요:
 
         질문에 대한 명확한 답변 및 관련 맥락 언급
@@ -444,14 +453,13 @@ def generate_resume_feedback_node(state: GraphState) -> GraphState:
         다른 불필요한 설명은 작성하지 말고, 피드백만 출력하세요.
     """)
 
-    # 다음은 지원하려는 기업의 최근 뉴스 요약입니다:
-    # \"\"\"{context}\"\"\"
+    
 
     # --- 체인 생성 ---
     feedback_chain = prompt_template | llm | StrOutputParser()
 
     feedback = feedback_chain.invoke({
-        # "context": "\n---\n".join(state['relevant_chunks']),
+        "context": "\n---\n".join(state['relevant_chunks']),
         "question": state['question'],
         "resume_summary": state['user_file_summary']
     })
@@ -473,38 +481,40 @@ def create_workflow():
     graph = StateGraph(GraphState)
 
     # 노드 등록
-    graph.add_node("route_request", route_request_node)
     graph.add_node("retrieve_from_chroma", retrieve_from_chroma_node)
+    graph.add_node("route_request", route_request_node)
     graph.add_node("get_tavily_snippets", get_tavily_snippets)
     graph.add_node("generate_answer", generate_answer_node)
-    graph.add_node("grade_answer", grade_answer_node)
+    # graph.add_node("grade_answer", grade_answer_node)
     graph.add_node("load_and_summarize_resume", load_and_summarize_resume_node)
     graph.add_node("generate_resume_feedback", generate_resume_feedback_node)
     # 그래프 흐름 정의
-    graph.set_entry_point("route_request")
+    graph.set_entry_point("retrieve_from_chroma")
+
+    graph.add_edge("retrieve_from_chroma", "route_request")
 
     # 라우팅 조건 설정
     graph.add_conditional_edges(
         "route_request",
         lambda state: state["input_type"],
         {
-            "qa": "retrieve_from_chroma",
+            "qa": "get_tavily_snippets",
             "feedback": "load_and_summarize_resume",
         }
     )
 
     # Q&A 경로
-    graph.add_edge("retrieve_from_chroma", "get_tavily_snippets")
     graph.add_edge("get_tavily_snippets", "generate_answer")
-    graph.add_edge("generate_answer", "grade_answer")
-    graph.add_conditional_edges(
-        "grade_answer",
-        lambda state: "grounded" if state.get("is_grounded", False) else "not_grounded",
-        {
-            "grounded": END,
-            "not_grounded": "generate_answer"  # (수정) 실패 시 답변 재생성 (Self-Correction)
-        }
-    )
+    # graph.add_edge("generate_answer", "grade_answer")
+    graph.add_edge("generate_answer", END)
+    # graph.add_conditional_edges(
+    #     "grade_answer",
+    #     lambda state: "grounded" if state.get("is_grounded", False) else "not_grounded",
+    #     {
+    #         "grounded": END,
+    #         "not_grounded": "generate_answer"  # (수정) 실패 시 답변 재생성 (Self-Correction)
+    #     }
+    # )
 
     # 피드백 경로
     graph.add_edge("load_and_summarize_resume", "generate_resume_feedback")
