@@ -32,6 +32,10 @@ services:
       - SPRING_SERVER_URL=http://spring-app:8080
       - VECTOR_DB_HOST=${VECTOR_DB_HOST}
       - VECTOR_DB_PORT=${VECTOR_DB_PORT}
+      - LANGSMITH_TRACING=true
+      - LANGSMITH_PROJECT=llm-service-already
+      - LANGSMITH_ENDPOINT=${LANGSMITH_ENDPOINT}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY}
     entrypoint: ["/app/entrypoint.sh"]
 
 networks:
