@@ -7,11 +7,24 @@ from langchain_core.prompts import PromptTemplate
 from .chat_langgraph import get_chroma_client, get_embeddings
 from langchain_chroma import Chroma
 import json
+from langsmith import Client
+from langsmith import traceable
 
 
+
+# ========== 환경 설정 ==========
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# LangSmith API Key 설정
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
+LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "llm-service-already")
+LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "true").lower() == "true"
+LANGSMITH_ENDPOINT = os.getenv("LANGSMITH_ENDPOINT")
+api_key = os.getenv("LANGSMITH_API_KEY")
+client = Client(api_key=api_key)
+
+# ========== LLM 및 Prompt ==========
 def get_llm():
     """LLM 인스턴스를 반환"""
     return ChatOpenAI(
@@ -44,6 +57,7 @@ prompt = PromptTemplate(
 
 output_parser = StrOutputParser()
 
+# ========== 유틸 함수 ==========
 def clean_llm_output(text: str) -> str:
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = text.strip()
@@ -51,6 +65,7 @@ def clean_llm_output(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
+@traceable(run_type="chain", name="Simple_Chain")
 def summarize_news(news_json: dict) -> str:
     news_id = str(news_json["id"])
 
@@ -73,7 +88,7 @@ def summarize_news(news_json: dict) -> str:
 
         # dummy question (LLM 요약용이므로 질문 의미 없음)
         dummy_question = "이 뉴스의 전체 내용을 주세요."
-        documents = retriever.get_relevant_documents(dummy_question)
+        documents = retriever.invoke(dummy_question)
 
         if not documents:
             raise ValueError(f"news_id '{news_id}' 에 해당하는 뉴스 원문을 ChromaDB에서 찾을 수 없습니다.")
@@ -113,3 +128,4 @@ def summarize_news(news_json: dict) -> str:
 
     raw_output = chain.invoke(inputs)
     return clean_llm_output(raw_output)
+
