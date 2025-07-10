@@ -40,13 +40,15 @@ import chromadb
 # 1. 초기화 및 설정
 # ==============================================================================
 
+load_dotenv()
+
 llm = None
 embeddings = None
-tavily_tool = TavilySearch(k=3)
 
-load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+
+tavily_tool = TavilySearch(k=3, tavily_api_key=TAVILY_API_KEY)
 
 # LangSmith API Key 설정
 LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
@@ -60,19 +62,19 @@ def get_llm():
     global llm
     if llm is None:
         load_dotenv()
-        # llm = ChatGoogleGenerativeAI(
-        #     model="gemini-2.5-pro",
-        #     temperature=0.7,
-        #     max_tokens=None,
-        #     timeout=None,
-        #     max_retries=2,
-        # )
-        llm = ChatOpenAI(
-            api_key=OPENAI_API_KEY,
-            base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            temperature=0.7
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-pro",
+            temperature=0.7,
+            max_tokens=None,
+            timeout=None,
+            max_retries=2,
         )
+        # llm = ChatOpenAI(
+        #     api_key=OPENAI_API_KEY,
+        #     base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
+        #     model="meta-llama/llama-4-scout-17b-16e-instruct",
+        #     temperature=0.7
+        # )
     return llm
 
 def get_embeddings():
