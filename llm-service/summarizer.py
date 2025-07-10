@@ -21,8 +21,7 @@ LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
 LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "llm-service-already")
 LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "true").lower() == "true"
 LANGSMITH_ENDPOINT = os.getenv("LANGSMITH_ENDPOINT")
-api_key = os.getenv("LANGSMITH_API_KEY")
-client = Client(api_key=api_key)
+client = Client(api_key=LANGSMITH_API_KEY)
 
 # ========== LLM 및 Prompt ==========
 def get_llm():
