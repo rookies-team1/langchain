@@ -33,8 +33,8 @@ from chromadb import chromadb
 import re
 import chromadb
 
-
-chroma_client = chromadb.HttpClient(host="localhost", port=8001)
+# 로컬 ChromaDB 클라이언트 설정
+# chroma_client = chromadb.HttpClient(host="localhost", port=8001)
 
 # ==============================================================================
 # 1. 초기화 및 설정
