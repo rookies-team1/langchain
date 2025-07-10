@@ -7,7 +7,7 @@ client = chromadb.HttpClient(host="localhost", port=8001)
 collection = client.get_or_create_collection(name="user_resume_db")
 
 # 3. 저장된 ID로 데이터 조회
-result = collection.get(ids=["1_1"])
+result = collection.get(ids=["2_2"])
 
 # 4. 내용 확인
 print("✅ 저장된 ID:", result['ids'])

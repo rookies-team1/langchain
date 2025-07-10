@@ -24,13 +24,17 @@ from langchain.chains import LLMChain, RetrievalQA
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_ollama import OllamaEmbeddings
+from langsmith import Client
+from langsmith import traceable
+from langsmith import traceable
 import json
 from langchain_chroma import Chroma
 from chromadb import chromadb
 import re
 import chromadb
 
-# chroma_client = chromadb.HttpClient(host="localhost", port=8001)
+
+chroma_client = chromadb.HttpClient(host="localhost", port=8001)
 
 # ==============================================================================
 # 1. 초기화 및 설정
@@ -43,6 +47,14 @@ tavily_tool = TavilySearch(k=3)
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+
+# LangSmith API Key 설정
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
+LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "llm-service-already")
+LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "true").lower() == "true"
+LANGSMITH_ENDPOINT = os.getenv("LANGSMITH_ENDPOINT")
+api_key = os.getenv("LANGSMITH_API_KEY")
+client = Client(api_key=api_key)
 
 def get_llm():
     """LLM 인스턴스를 가져옵니다. 없으면 생성합니다."""
@@ -168,6 +180,7 @@ def clean_pdf_text(text: str) -> str:
     return text.strip()
 import json
 
+@traceable(run_type="chain", name="Simple_Chain")
 def retrieve_from_chroma_node(state: GraphState) -> GraphState:
     """ChromaDB에서 news_id를 필터링하여 관련 뉴스 청크를 검색하여 state['relevant_chunks']에 할당."""
 
@@ -197,7 +210,8 @@ def retrieve_from_chroma_node(state: GraphState) -> GraphState:
         if hasattr(retriever, 'invoke'):
             documents = retriever.invoke(question)
         else:
-            documents = retriever.get_relevant_documents(question)
+            documents = retriever.invoke(question)
+
     except Exception as e:
         print(f"❌ Chroma 검색 중 오류 발생: {e}")
         state['relevant_chunks'] = []
@@ -236,6 +250,7 @@ def retrieve_from_chroma_node(state: GraphState) -> GraphState:
 
 
 # --- 라우팅 노드 ---
+@traceable(run_type="chain", name="Simple_Chain")
 def route_request_node(state: GraphState) -> dict:
     """사용자 질문을 분석하여 다음 단계를 결정하는 라우터"""
     print("--- 2. 요청 라우팅 ---")
@@ -263,6 +278,7 @@ def route_request_node(state: GraphState) -> dict:
     
     
 # --- 뉴스 Q&A 경로 ---
+@traceable(run_type="chain", name="Simple_Chain")
 def get_tavily_snippets(state: GraphState):
     """
     Tavily를 사용해 기업명 + 사용자 질문 기반의 최신 웹 스니펫을 검색하여 반환.
@@ -300,7 +316,7 @@ def get_tavily_snippets(state: GraphState):
         return state
     
 
-
+@traceable(run_type="chain", name="Simple_Chain")
 def generate_answer_node(state: GraphState):
     print("--- 4a. 답변 생성 ---")
     llm = get_llm()
@@ -328,6 +344,7 @@ def generate_answer_node(state: GraphState):
     state['answer'] = clean_llm_output(answer)
     return state
 
+@traceable(run_type="chain", name="Simple_Chain")
 def grade_answer_node(state: GraphState):
     print("--- 5a. 답변 검증 ---")
     llm = get_llm()
@@ -355,6 +372,7 @@ def grade_answer_node(state: GraphState):
 
 
 # --- 문서 피드백 경로 ---
+@traceable(run_type="chain", name="Simple_Chain")
 def load_and_summarize_resume_node(state: GraphState):
 
     print("--- 3b. 이력서 로드 및 요약 ---")
@@ -414,16 +432,22 @@ def load_and_summarize_resume_node(state: GraphState):
             "type": "resume_summary"
         }
 
+        id_value = f"{state['session_id']}_{state['user_id']}"
+
+        # 기존 데이터 삭제 (덮어씌움)
+        collection.delete(ids=[id_value])
+
         # ChromaDB에 summary_text를 저장 (내용 기반 검색이 필요 없으므로 dummy 임베딩 사용 가능)
         collection.add(
             documents=[state['user_file_summary']],
             metadatas=[metadata],
-            ids=[f"{state['session_id']}_{state['user_id']}"]
+            ids=[id_value]
         )
         print(f"✅ 이력서 요약 내용을 ChromaDB에 저장 완료 (id={state['session_id']}_{state['user_id']})")
 
     return state
 
+@traceable(run_type="chain", name="Simple_Chain")
 def generate_resume_feedback_node(state: GraphState) -> GraphState:
     """
     이력서  요약된 내용 + 질문 + 기업 뉴스 요약 기반으로
@@ -550,11 +574,15 @@ if __name__ == "__main__":
     try:
         # stream()을 사용하면 각 단계의 출력을 볼 수 있음
         for output in agent_app.stream(qa_input, {"recursion_limit": 10}):
+        # for output in agent_app.stream(qa_input, {"recursion_limit": 10, "callbacks": [tracer]}):
             node_name = list(output.keys())[0]
             node_output = output[node_name]
             print(f"--- 노드 '{node_name}' 실행 완료 ---")
         
         final_state = agent_app.invoke(qa_input)
+        # final_state = agent_app.invoke(qa_input, config={"callbacks": [tracer]})
+        
+
         print("\n[최종 답변]:", final_state.get('answer'))
 
     except Exception as e:
