@@ -26,7 +26,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # 런타임에 필요한 시스템 의존성 설치 및 apt 캐시 삭제
-RUN apt-get update && apt-get install -y libopenblas-dev libomp-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libopenblas-dev libomp-dev curl && rm -rf /var/lib/apt/lists/*
 
 # 빌더 스테이지에서 생성된 가상 환경을 최종 이미지로 복사
 COPY --from=builder /app/.venv ./.venv

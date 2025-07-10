@@ -52,10 +52,12 @@ jobs:
             git pull origin main
                       
             echo "OLLAMA_BASE_URL=${{ secrets.OLLAMA_BASE_URL }}" > .env
-            echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > .env
-            echo "TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}" > .env
+            echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" >> .env
+            echo "TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}" >> .env
             echo "VECTOR_DB_PORT=${{ secrets.VECTOR_DB_PORT }}" >> .env
             echo "VECTOR_DB_HOST=${{ secrets.VECTOR_DB_HOST }}" >> .env
+            echo "LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}" >> .env
+            echo "LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}" >> .env
             docker-compose pull
             docker-compose up -d
 
