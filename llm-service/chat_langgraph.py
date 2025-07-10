@@ -574,13 +574,11 @@ if __name__ == "__main__":
     try:
         # stream()을 사용하면 각 단계의 출력을 볼 수 있음
         for output in agent_app.stream(qa_input, {"recursion_limit": 10}):
-        # for output in agent_app.stream(qa_input, {"recursion_limit": 10, "callbacks": [tracer]}):
             node_name = list(output.keys())[0]
             node_output = output[node_name]
             print(f"--- 노드 '{node_name}' 실행 완료 ---")
         
         final_state = agent_app.invoke(qa_input)
-        # final_state = agent_app.invoke(qa_input, config={"callbacks": [tracer]})
         
 
         print("\n[최종 답변]:", final_state.get('answer'))
@@ -612,11 +610,11 @@ if __name__ == "__main__":
         print(f"\n[오류 발생]: {e}")
         
     # 그래프 시각화
-    # try:
-    #     graph_image_path = "agent_workflow.png"
-    #     with open(graph_image_path, "wb") as f:
-    #         f.write(agent_app.get_graph().draw_mermaid_png())
-    #     print(f"\n✅ LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
-    # except Exception as e:
-    #     print(f"그래프 시각화 중 오류 발생: {e}")
+    try:
+        graph_image_path = "agent_workflow.png"
+        with open(graph_image_path, "wb") as f:
+            f.write(agent_app.get_graph().draw_mermaid_png())
+        print(f"\n✅ LangGraph 구조가 '{graph_image_path}' 파일로 저장되었습니다.")
+    except Exception as e:
+        print(f"그래프 시각화 중 오류 발생: {e}")
         
