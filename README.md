@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker"/>
   <img src="https://img.shields.io/badge/LangChain-8A2BE2?style=for-the-badge" alt="LangChain"/>
   <img src="https://img.shields.io/badge/Ollama-FFA500?style=for-the-badge" alt="Ollama"/>
-  <img src="https://img.shields.io/badge/Chroma-DB-6E44FF?style=for-the-badge" alt="Chroma DB"/>
+  <img src="https://img.shields.io/badge/Chroma-DB-6E44FF?style=for-the-badge" alt="ChromaDB"/>
 </p>
 
 ---
