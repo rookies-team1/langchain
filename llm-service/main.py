@@ -1,3 +1,4 @@
+from asyncio import to_thread
 from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -289,7 +290,7 @@ async def summarize(news: SummarizeRequest):
         raise HTTPException(status_code=500, detail=f"내부 서버 오류: {e}")
     
     # LangChain에 전달할 입력값 구성  
-    summary_text = summarize_news({
+    summary_text = await to_thread(summarize_news,{
         "id": news.id
     })
     
