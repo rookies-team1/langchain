@@ -9,7 +9,7 @@ on:
 
 env:
   DOCKER_IMAGE: llm-service
-  DOCKER_TAG: 0.3
+  DOCKER_TAG: 0.4
   PROJECT_DIRECTORY: llm-svc
 
 jobs:
@@ -56,6 +56,7 @@ jobs:
             echo "TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}" >> .env
             echo "VECTOR_DB_PORT=${{ secrets.VECTOR_DB_PORT }}" >> .env
             echo "VECTOR_DB_HOST=${{ secrets.VECTOR_DB_HOST }}" >> .env
+            echo "SPRING_SERVER_URL=${{ secrets.SPRING_SERVER_URL }}" >> .env
             echo "LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}" >> .env
             echo "LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}" >> .env
 

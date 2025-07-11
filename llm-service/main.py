@@ -35,7 +35,7 @@ tavily_api_key = os.getenv("TAVILY_API_KEY")
 ollama_base_url = os.getenv("OLLAMA_BASE_URL")
 vector_db_host = os.getenv("VECTOR_DB_HOST", "localhost")
 vector_db_port = os.getenv("VECTOR_DB_PORT", 8001)
-spring_server_url = os.getenv("SPRING_SERVER_URL", "http://spring-app:8080")
+spring_server_url = os.getenv("SPRING_SERVER_URL", "http://already-server:8080")
 
 
 class HistoryMessage(BaseModel):
@@ -196,7 +196,7 @@ async def chat_with_file(
 class SummarizeRequest(BaseModel):
     id: int
     title: str
-    content: str
+    content: Optional[str] = None
     company_name: str
     
 class SummarizeResponse(BaseModel):
@@ -213,7 +213,9 @@ async def summarize(news: SummarizeRequest):
 
     try:
         chroma_client = get_chroma_client()
-        
+        # content 가 비어있는 경우에만 Spring 서버에게 원문 요청
+        # 
+            
         try:
             # 컬렉션이 존재하는지 먼저 확인
             collection = chroma_client.get_collection(name=collection_name)
@@ -224,37 +226,60 @@ async def summarize(news: SummarizeRequest):
 
         # VectorDB에 news_id가 없는 경우, Spring에서 가져와 저장
         if not results or not results.get('ids'):
-            print(f"⚠️ ChromaDB에 news_id '{news.id}' 없음. Spring 서버에서 원문을 가져와 DB에 저장합니다.")
             
-            # 1. Spring 서버에서 뉴스 원문 가져오기
-            news_content = ""
-            async with httpx.AsyncClient() as client:
-                # TODO : backend url 수정
-                api_url = f"{spring_server_url}/news/{news.id}/detail"
-                print(f"Spring 서버에 뉴스 원문 요청: {api_url}")
-                response = await client.get(api_url, timeout=10.0)
-                response.raise_for_status()
-                news_content = response.content.decode('utf-8') # 바이트를 문자열로 디코딩
-                print("✅ 뉴스 원문 수신 완료")
+            # news.content 가 존재하는 경우 
+            if news.content is not None and news.content != '':
+                news_content = news.content
+                # 원문을 VectorDB에 저장
+                print("⏳ 뉴스 원문을 VectorDB에 저장하는 중...")
+                text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                
+                # Document 객체 생성 및 메타데이터 추가
+                docs = [Document(page_content=chunk, metadata={"news_id": str(news.id)}) 
+                        for chunk in text_splitter.split_text(news_content)]
 
-            # 2. 가져온 원문을 VectorDB에 저장
-            print("⏳ 가져온 뉴스 원문을 VectorDB에 저장하는 중...")
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-            
-            # Document 객체 생성 및 메타데이터 추가
-            docs = [Document(page_content=chunk, metadata={"news_id": str(news.id)}) 
-                    for chunk in text_splitter.split_text(news_content)]
+                # ChromaDB에 저장
+                Chroma.from_documents(
+                    documents=docs,
+                    embedding=get_embeddings(),
+                    client=chroma_client,
+                    collection_name=collection_name
+                )
+                print(f"✅ news_id '{news.id}'를 VectorDB에 성공적으로 저장했습니다.")
+                
+            else:
+                # news.content 가 없는 경우 스프링 서버에서 가져와 저장
+                print(f"⚠️ ChromaDB에 news_id '{news.id}' 없음. Spring 서버에서 원문을 가져와 DB에 저장합니다.")
+                
+                # 1. Spring 서버에서 뉴스 원문 가져오기
+                news_content = ""
+                async with httpx.AsyncClient() as client:
+                    # TODO : backend url 수정
+                    api_url = f"{spring_server_url}/news/{news.id}/detail"
+                    print(f"Spring 서버에 뉴스 원문 요청: {api_url}")
+                    response = await client.get(api_url, timeout=10.0)
+                    response.raise_for_status()
+                    news_content = response.content.decode('utf-8') # 바이트를 문자열로 디코딩
+                    print("✅ 뉴스 원문 수신 완료")
 
-            # ChromaDB에 저장
-            Chroma.from_documents(
-                documents=docs,
-                embedding=get_embeddings(),
-                client=chroma_client,
-                collection_name=collection_name
-            )
-            print(f"✅ news_id '{news.id}'를 VectorDB에 성공적으로 저장했습니다.")
+                # 2. 가져온 원문을 VectorDB에 저장
+                print("⏳ 가져온 뉴스 원문을 VectorDB에 저장하는 중...")
+                text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                
+                # Document 객체 생성 및 메타데이터 추가
+                docs = [Document(page_content=chunk, metadata={"news_id": str(news.id)}) 
+                        for chunk in text_splitter.split_text(news_content)]
+
+                # ChromaDB에 저장
+                Chroma.from_documents(
+                    documents=docs,
+                    embedding=get_embeddings(),
+                    client=chroma_client,
+                    collection_name=collection_name
+                )
+                print(f"✅ news_id '{news.id}'를 VectorDB에 성공적으로 저장했습니다.")
         else:
-            print(f"✅ ChromaDB에서 news_id '{news.id}'를 확인했습니다.")
+            print(f"✅ ChromaDB에서 news_id '{news.id}'를 확인했습니다.")          
 
     except httpx.HTTPStatusError as e:
         print(f"🔥 Spring API 오류: {e.response.status_code} - {e.response.text}")

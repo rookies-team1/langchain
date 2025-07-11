@@ -9,29 +9,16 @@ from langchain_chroma import Chroma
 import json
 from langsmith import Client
 from langsmith import traceable
+from langchain_google_genai import ChatGoogleGenerativeAI
 
-
-
-# ========== 환경 설정 ==========
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-# LangSmith API Key 설정
-LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
-LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "llm-service-already")
-LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "true").lower() == "true"
-LANGSMITH_ENDPOINT = os.getenv("LANGSMITH_ENDPOINT")
-client = Client(api_key=LANGSMITH_API_KEY)
-
-# ========== LLM 및 Prompt ==========
-def get_llm():
-    """LLM 인스턴스를 반환"""
-    return ChatOpenAI(
-        api_key=OPENAI_API_KEY,
-        base_url="https://api.groq.com/openai/v1",
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
-        temperature=0.7
-    )
+# ========== LLM 및 처리 체인 초기화 ==========
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-pro",
+    temperature=0.5,
+    max_tokens=None,
+    timeout=None,
+    max_retries=2,
+)
 
 prompt = PromptTemplate(
     input_variables=["title", "content"],
@@ -52,9 +39,13 @@ prompt = PromptTemplate(
 
     [내용]
     {content}
-    """)     
+    """    
+)
 
 output_parser = StrOutputParser()
+
+# 처리 체인을 미리 구성
+summarization_chain = prompt | llm | output_parser
 
 # ========== 유틸 함수 ==========
 def clean_llm_output(text: str) -> str:
@@ -117,14 +108,14 @@ def summarize_news(news_json: dict) -> str:
         combined_content = "(원문을 불러오지 못했습니다.)"
 
     # 2️⃣ LLM 요약 호출
-    llm = get_llm()
-    chain = prompt | llm | output_parser
+    # llm = get_llm()
+    # chain = prompt | llm | output_parser
 
     inputs = {
         "title": news_json.get("title", ""),
         "content": combined_content
     }
 
-    raw_output = chain.invoke(inputs)
+    raw_output = summarization_chain.invoke(inputs)
     return clean_llm_output(raw_output)
 

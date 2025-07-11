@@ -44,6 +44,7 @@ load_dotenv()
 
 llm = None
 embeddings = None
+chroma_client = None
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
@@ -85,7 +86,7 @@ def get_embeddings():
         try:
             # ChromaDB와 같은 영구적인 저장소를 사용할 것이므로, 일관된 임베딩 모델 사용이 중요
             embeddings = OllamaEmbeddings(
-                model="bge-m3:latest", 
+                model="bge-m3:567m", 
                 base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
             )
         except Exception as e:
@@ -101,7 +102,7 @@ def get_chroma_client():
         load_dotenv()
         # 환경 변수 또는 기본값으로 ChromaDB에 연결
         CHROMA_HOST = os.getenv("VECTOR_DB_HOST", "localhost")
-        CHROMA_PORT = int(os.getenv("VECTOR_DB_PORT", "8001")) # ChromaDB 기본 포트는 8000이나, docker-compose 예시에서 8001로 설정
+        CHROMA_PORT = int(os.getenv("VECTOR_DB_PORT", "8001")) # ChromaDB 기본 포트는 8001:8000
         chroma_client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
     return chroma_client
 
