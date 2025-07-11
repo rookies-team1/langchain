@@ -196,9 +196,9 @@ async def chat_with_file(
 # =========================== summarizer POST 요청 처리 ===========================
 class SummarizeRequest(BaseModel):
     id: int
-    title: str
+    title: Optional[str] = None
     content: Optional[str] = None
-    company_name: str
+    company_name: Optional[str] = None
     
 class SummarizeResponse(BaseModel):
     summary: str
