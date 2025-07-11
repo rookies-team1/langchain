@@ -44,5 +44,7 @@ RUN chmod +x /app/entrypoint.sh
 # 8000번 포트를 외부에 노출
 EXPOSE 8000
 
+ENTRYPOINT ["/app/entrypoint.sh"]
+
 # uvicorn을 사용하여 애플리케이션 실행
-CMD ["uvicorn", "llm-service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# CMD ["uvicorn", "llm-service.main:app", "--host", "0.0.0.0", "--port", "8000"]

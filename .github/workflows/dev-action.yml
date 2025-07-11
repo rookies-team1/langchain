@@ -9,7 +9,7 @@ on:
 
 env:
   DOCKER_IMAGE: llm-service
-  DOCKER_TAG: 0.1
+  DOCKER_TAG: 0.2
   PROJECT_DIRECTORY: llm-svc
 
 jobs:
@@ -58,7 +58,11 @@ jobs:
             echo "VECTOR_DB_HOST=${{ secrets.VECTOR_DB_HOST }}" >> .env
             echo "LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}" >> .env
             echo "LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}" >> .env
+
             docker-compose pull
+
+            docker-compose down
+
             docker-compose up -d
 
       # 빌드 결과 출력
