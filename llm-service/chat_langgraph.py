@@ -86,7 +86,7 @@ def get_embeddings():
         try:
             # ChromaDB와 같은 영구적인 저장소를 사용할 것이므로, 일관된 임베딩 모델 사용이 중요
             embeddings = OllamaEmbeddings(
-                model="bge-m3:567m", 
+                model="qwen3:0.6b", 
                 base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
             )
         except Exception as e:
