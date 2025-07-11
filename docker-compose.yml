@@ -18,7 +18,7 @@ services:
       - chroma_data:/chroma/chroma
 
   llm-service:
-    image: kwonsoonmin/llm-service:0.1
+    image: kwonsoonmin/llm-service:0.2
     container_name: llm-svc
     depends_on:
       - ollama
