@@ -79,6 +79,82 @@ class ChatResponse(BaseModel):
     question: str
     answer: str
 
+@app.on_event("startup")
+async def startup_event():
+    """
+    서버 시작 시 Spring 서버로부터 모든 뉴스 데이터를 가져와 ChromaDB에 저장합니다.
+    """
+    print("🚀 서버 시작... Spring 서버에서 모든 뉴스 데이터를 가져와 ChromaDB에 저장합니다.")
+    
+    collection_name = "news_vector_db"
+    
+    try:
+        chroma_client = get_chroma_client()
+        collection = chroma_client.get_or_create_collection(name=collection_name) # 없으면 생성
+        
+        # 1. Spring 서버에서 모든 뉴스 ID와 콘텐츠 가져오기
+        all_news_data = []
+        async with httpx.AsyncClient() as client:
+            api_url = f"{spring_server_url}/news/all-id-content"
+            print(f"Spring 서버에 모든 뉴스 요청: {api_url}")
+            response = await client.get(api_url, timeout=30.0)
+            response.raise_for_status()
+            response_json = response.json() # 응답 JSON 형태 success, data
+            if (response_json.get("success") is True):
+                all_news_data = response_json.get("data", [])
+                print(f"✅ 총 {len(all_news_data)}개의 뉴스 수신 완료")
+            else:
+                # 서버가 success: false를 응답한 경우
+                error_message = response_json.get("message", "No error message provided.")
+                print(f"🔥 Spring 서버에서 실패 응답을 받았습니다: {error_message}")
+                return # 실패 시 함수 종료
+            
+
+        # 2. 가져온 데이터를 VectorDB에 저장
+        print("⏳ 가져온 모든 뉴스를 VectorDB에 저장하는 중...")
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        
+        for news_item in all_news_data[:10]:
+            print(f"Type of news_item: {type(news_item)}")
+            print(f"Content of news_item: {news_item}")
+            news_id = str(news_item.get("id"))
+            news_content = news_item.get("contents")
+
+            if not news_id or not news_content:
+                print(f"⚠️ news_id 또는 content가 없는 데이터를 건너뜁니다: {news_item}")
+                continue
+
+            # 이미 해당 news_id가 DB에 있는지 확인
+            existing_docs = collection.get(where={"news_id": news_id}, limit=1)
+            if existing_docs and existing_docs.get('ids'):
+                print(f"✅ news_id '{news_id}'는 이미 VectorDB에 존재합니다. 건너뜁니다.")
+                continue
+
+            # Document 객체 생성 및 메타데이터 추가
+            docs = [Document(page_content=chunk, metadata={"news_id": news_id}) 
+                    for chunk in text_splitter.split_text(news_content)]
+
+            # ChromaDB에 저장
+            if docs:
+                Chroma.from_documents(
+                    documents=docs,
+                    embedding=get_embeddings(),
+                    client=chroma_client,
+                    collection_name=collection_name
+                )
+                print(f"✅ news_id '{news_id}'를 VectorDB에 성공적으로 저장했습니다.")
+
+        print("🎉 모든 뉴스 데이터의 VectorDB 저장이 완료되었습니다.")
+
+    except httpx.RequestError as e:
+        print(f"🔥 Spring 서버 연결 오류: {e}")
+        print("🔥 뉴스 데이터를 가져오지 못했지만 서버는 계속 실행됩니다. 각 요청 시 데이터를 개별적으로 가져옵니다.")
+    except Exception as e:
+        print(f"🔥 서버 시작 중 예외 발생: {e}")
+        # 시작 시 데이터 로딩 실패가 전체 서버를 중단시키지 않도록 처리
+        print("🔥 데이터 로딩 중 오류가 발생했지만 서버는 계속 실행됩니다.")
+
+
 @app.get("/")
 def read_root():
     return {"message": "AI Agent 서버가 실행 중입니다. /docs 로 이동하여 API를 테스트하세요."}
