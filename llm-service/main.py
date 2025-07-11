@@ -1,5 +1,5 @@
 from uuid import uuid4
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from . import summarizer
@@ -27,7 +27,29 @@ import tempfile
 # uvicorn llm-service.main:app --host 0.0.0.0 --port 8000
 
 
-app = FastAPI(title="AI Agent API")
+from contextlib import asynccontextmanager
+
+# ... (기존 임포트)
+
+# chat_langgraph에서 필요한 함수 및 클래스 추가 임포트
+from .chat_langgraph import agent_app, get_chroma_client, get_embeddings, get_llm
+
+# ... (기존 코드)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 시작 시 모델 로드
+    print("--- 애플리케이션 시작: 모델 로드 중 ---")
+    app.state.llm = get_llm()
+    app.state.embeddings = get_embeddings()
+    print("--- 모델 로드 완료 ---")
+    yield
+    # 종료 시 정리 (필요한 경우)
+    print("--- 애플리케이션 종료 ---")
+
+app = FastAPI(title="AI Agent API", lifespan=lifespan)
+
+# ... (기존 코드)
 
 # 환경 변수에서 API 키 로드
 google_api_key = os.getenv("GOOGLE_API_KEY")
@@ -64,10 +86,11 @@ def read_root():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_with_file(
-    request: str = Form(...),             
+    request: Request,
+    data: str = Form(...),
     file: Optional[UploadFile] = File(None)
 ):
-    request_dict = json.loads(request)
+    request_dict = json.loads(data)
     parsed_request = ChatRequest(**request_dict)
     
     temp_path = None    
@@ -158,7 +181,9 @@ async def chat_with_file(
             "question": parsed_request.question,
             "news_id": parsed_request.news_id,
             "company": parsed_request.company,
-            "chat_history": lc_chat_history
+            "chat_history": lc_chat_history,
+            "llm": request.app.state.llm, # llm 추가
+            "embeddings": request.app.state.embeddings # embeddings 추가
         }
         if temp_path:
             inputs["file_path"] = temp_path
@@ -205,7 +230,7 @@ class SummarizeResponse(BaseModel):
     error_content: str
 
 @app.post("/summarize", response_model=SummarizeResponse)
-async def summarize(news: SummarizeRequest):
+async def summarize(request: Request, news: SummarizeRequest):
 
     print(f"\n--- 🗣️  뉴스 ID: {news.id}에 대한 요약 요청 수신  ---")
     
@@ -289,8 +314,10 @@ async def summarize(news: SummarizeRequest):
         raise HTTPException(status_code=500, detail=f"내부 서버 오류: {e}")
     
     # LangChain에 전달할 입력값 구성  
-    summary_text = summarize_news({
-        "id": news.id
+    summary_text = await summarize_news({
+        "id": news.id,
+        "llm": request.app.state.llm,
+        "embeddings": request.app.state.embeddings
     })
     
     print(f"✅ LangChain 처리 완료")

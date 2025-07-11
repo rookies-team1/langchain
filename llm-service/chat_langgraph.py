@@ -119,6 +119,8 @@ class GraphState(TypedDict):
     file_path: Optional[str]
     company: Optional[str]  # 기업명 (Tavily 검색에 사용)
     chat_history: List[BaseMessage]
+    llm: Optional[Any]
+    embeddings: Optional[Any]
     # 그래프 내부에서 관리되는 값
     input_type: str  # 'qa' or 'feedback'
     # question: str  # 재구성된 질문
@@ -188,7 +190,7 @@ def retrieve_from_chroma_node(state: GraphState) -> GraphState:
 
     print(f"--- 1. ChromaDB 뉴스 검색 시작 (news_id={state['news_id']}) ---")
     
-    embeddings = get_embeddings()
+    embeddings = state['embeddings']
     chroma_client = get_chroma_client()
     
     vectorstore = Chroma(
@@ -256,7 +258,7 @@ def retrieve_from_chroma_node(state: GraphState) -> GraphState:
 def route_request_node(state: GraphState) -> dict:
     """사용자 질문을 분석하여 다음 단계를 결정하는 라우터"""
     print("--- 2. 요청 라우팅 ---")
-    llm = get_llm()
+    llm = state['llm']
     route_prompt = ChatPromptTemplate.from_template(
         """사용자 질문 '{question}'은 다음 중 어떤 유형에 가장 가깝습니까?
         - 뉴스 기사에 대한 질문: 'qa'
@@ -321,7 +323,7 @@ def get_tavily_snippets(state: GraphState):
 @traceable(run_type="chain", name="Simple_Chain")
 def generate_answer_node(state: GraphState):
     print("--- 4a. 답변 생성 ---")
-    llm = get_llm()
+    llm = state['llm']
     prompt = ChatPromptTemplate.from_template(
         """다음 [뉴스 기사 내용]과 [웹 검색 스니펫]을 참고하여 [질문]에 대해 한국어로 명확하고 간결하게 답변하세요.
         [뉴스 기사 내용]: {context}
@@ -349,7 +351,7 @@ def generate_answer_node(state: GraphState):
 @traceable(run_type="chain", name="Simple_Chain")
 def grade_answer_node(state: GraphState):
     print("--- 5a. 답변 검증 ---")
-    llm = get_llm()
+    llm = state['llm']
     prompt = ChatPromptTemplate.from_template(
         """[뉴스 기사 내용]을 볼 때, [생성된 답변]이 [질문]에 대해 사실에 근거하는지 평가해주세요.
         근거했다면 'yes', 아니면 'no'라고만 답해주세요.
@@ -380,6 +382,7 @@ def load_and_summarize_resume_node(state: GraphState):
     print("--- 3b. 이력서 로드 및 요약 ---")
 
     file_path = state['file_path']
+    llm = state['llm']
 
     if not file_path or not os.path.exists(file_path):
         print("📂 파일 경로가 없으므로 ChromaDB에서 기존 요약을 조회합니다.")
@@ -457,7 +460,7 @@ def generate_resume_feedback_node(state: GraphState) -> GraphState:
     """
     print("--- 4b. 맞춤형 이력서 피드백 생성 ---")
     
-    llm = get_llm()
+    llm = state['llm']
 
     # --- 프롬프트 ---
     prompt_template = ChatPromptTemplate.from_template("""

@@ -10,6 +10,7 @@ import json
 from langsmith import Client
 from langsmith import traceable
 from langchain_google_genai import ChatGoogleGenerativeAI
+import asyncio
 
 # ========== LLM 및 처리 체인 초기화 ==========
 llm = ChatGoogleGenerativeAI(
@@ -56,13 +57,14 @@ def clean_llm_output(text: str) -> str:
     return text.strip()
 
 @traceable(run_type="chain", name="Simple_Chain")
-def summarize_news(news_json: dict) -> str:
+async def summarize_news(news_json: dict) -> str:
     news_id = str(news_json["id"])
+    llm = news_json["llm"]
+    embeddings = news_json["embeddings"]
 
     # 1️⃣ ChromaDB에서 news_id에 해당하는 원문 청크 가져오기
     try:
         chroma_client = get_chroma_client()
-        embeddings = get_embeddings()
         vectorstore = Chroma(
             client=chroma_client,
             collection_name="news_vector_db",
@@ -78,7 +80,7 @@ def summarize_news(news_json: dict) -> str:
 
         # dummy question (LLM 요약용이므로 질문 의미 없음)
         dummy_question = "이 뉴스의 전체 내용을 주세요."
-        documents = retriever.invoke(dummy_question)
+        documents = await retriever.ainvoke(dummy_question)
 
         if not documents:
             raise ValueError(f"news_id '{news_id}' 에 해당하는 뉴스 원문을 ChromaDB에서 찾을 수 없습니다.")
@@ -108,14 +110,42 @@ def summarize_news(news_json: dict) -> str:
         combined_content = "(원문을 불러오지 못했습니다.)"
 
     # 2️⃣ LLM 요약 호출
-    # llm = get_llm()
-    # chain = prompt | llm | output_parser
-
     inputs = {
         "title": news_json.get("title", ""),
         "content": combined_content
     }
 
-    raw_output = summarization_chain.invoke(inputs)
+    raw_output = await summarization_chain.ainvoke(inputs)
     return clean_llm_output(raw_output)
 
+# ========== 테스트용 실행 블록 ==========
+if __name__ == "__main__":
+    load_dotenv()
+
+    # LangSmith 설정
+    LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
+    LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "llm-service-already")
+    LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "true").lower() == "true"
+    LANGSMITH_ENDPOINT = os.getenv("LANGSMITH_ENDPOINT")
+    client = Client(api_key=LANGSMITH_API_KEY)
+
+    # 테스트용 뉴스 데이터
+    test_news = {
+        "id": 101,
+        "title": "SK쉴더스, 제로 트러스트 모델로 클라우드 보안 강화",
+    }
+
+    # 비동기 함수 실행
+    async def main():
+        from .chat_langgraph import get_llm, get_embeddings
+        llm = get_llm()
+        embeddings = get_embeddings()
+        test_news["llm"] = llm
+        test_news["embeddings"] = embeddings
+        summary = await summarize_news(test_news)
+        print("="*50)
+        print("[뉴스 요약 결과]")
+        print(summary)
+        print("="*50)
+
+    asyncio.run(main())
