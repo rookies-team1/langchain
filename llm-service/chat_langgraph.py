@@ -24,6 +24,7 @@ from langchain.chains import LLMChain, RetrievalQA
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_ollama import OllamaEmbeddings
+from langchain_openai import ChatOpenAI
 from langsmith import Client
 from langsmith import traceable
 from langsmith import traceable
@@ -63,19 +64,19 @@ def get_llm():
     global llm
     if llm is None:
         load_dotenv()
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-pro",
-            temperature=0.7,
-            max_tokens=None,
-            timeout=None,
-            max_retries=2,
-        )
-        # llm = ChatOpenAI(
-        #     api_key=OPENAI_API_KEY,
-        #     base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
-        #     model="meta-llama/llama-4-scout-17b-16e-instruct",
-        #     temperature=0.7
+        # llm = ChatGoogleGenerativeAI(
+        #     model="gemini-2.5-pro",
+        #     temperature=0.7,
+        #     max_tokens=None,
+        #     timeout=None,
+        #     max_retries=2,
         # )
+        llm = ChatOpenAI(
+            api_key=OPENAI_API_KEY,
+            base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            temperature=0.7
+        )
     return llm
 
 def get_embeddings():

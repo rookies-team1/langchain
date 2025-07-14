@@ -10,15 +10,25 @@ import json
 from langsmith import Client
 from langsmith import traceable
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # ========== LLM 및 처리 체인 초기화 ==========
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-pro",
-    temperature=0.5,
-    max_tokens=None,
-    timeout=None,
-    max_retries=2,
-)
+# llm = ChatGoogleGenerativeAI(
+#     model="gemini-2.5-pro",
+#     temperature=0.5,
+#     max_tokens=None,
+#     timeout=None,
+#     max_retries=2,
+# )
+
+llm = ChatOpenAI(
+            api_key=OPENAI_API_KEY,
+            base_url="https://api.groq.com/openai/v1",  # Groq API 엔드포인트
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            temperature=0.7
+        )
 
 prompt = PromptTemplate(
     input_variables=["title", "content"],
