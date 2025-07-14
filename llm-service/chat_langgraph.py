@@ -50,6 +50,8 @@ chroma_client = None
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
+print(f"GPT 키 : {OPENAI_API_KEY[:2]}")
+
 tavily_tool = TavilySearch(k=3, tavily_api_key=TAVILY_API_KEY)
 
 # LangSmith API Key 설정

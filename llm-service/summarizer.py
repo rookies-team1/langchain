@@ -14,6 +14,8 @@ from langchain_openai import ChatOpenAI
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+print(f"GPT 키 : {OPENAI_API_KEY[:2]}")
+
 # ========== LLM 및 처리 체인 초기화 ==========
 # Gemini
 # llm = ChatGoogleGenerativeAI(
