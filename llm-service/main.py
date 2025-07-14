@@ -67,6 +67,8 @@ class ChatResponse(BaseModel):
 
 @app.get("/")
 def read_root():
+    OPENAI_API_KEY=os.getenv("OPENAI_API_KEY")
+    print(f"★★★★ GPT 키 : {OPENAI_API_KEY[:5]}")
     return {"message": "AI Agent 서버가 실행 중입니다. /docs 로 이동하여 API를 테스트하세요."}
 
 
